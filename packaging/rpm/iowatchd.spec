@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           iowatchd
-Version:        0.3.0
+Version:        0.3.1
 Release:        1%{?dist}
 Summary:        Lightweight disk IO monitor that logs which processes cause high IO
 License:        MIT
@@ -51,6 +51,8 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix} \
 %{_datadir}/fish/vendor_completions.d/iowatchd.fish
 
 %changelog
+* Sat Oct 17 2026 Thiapalm <thiago.palmieri@gmail.com> - 0.3.1-1
+- Update to 0.3.1
 * Sat Oct 17 2026 Thiapalm <thiago.palmieri@gmail.com> - 0.3.0-1
 - Update to 0.3.0
 * Sat Oct 17 2026 Thiapalm <thiago.palmieri@gmail.com> - 0.2.0-1
