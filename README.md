@@ -62,7 +62,7 @@ Set `notify_command` to run any command on every alert and recovery. It receives
 
     notify_command = logger -t iowatchd "$IOWATCHD_MESSAGE"
 
-Desktop pop-ups need the user's session bus, e.g. a script that runs `sudo -u USER DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus notify-send "$IOWATCHD_MESSAGE"`.
+For desktop pop-ups use the bundled helper: `notify_command = /usr/bin/iowatchd-notify` (shows the top processes on every logged-in desktop session, throttled to one alert per minute).
 
 ## Development
 

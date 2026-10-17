@@ -28,10 +28,10 @@ jobs:
           make uninstall DESTDIR="$PWD/stage" PREFIX=/usr
       - name: Syntax of scripts and completions
         run: |
-          bash -n install.sh iowatchd-log completions/iowatchd.bash
+          bash -n install.sh iowatchd-log iowatchd-notify completions/iowatchd.bash
           sudo apt-get install -y zsh shellcheck >/dev/null
           zsh -n completions/_iowatchd
-          shellcheck -S warning iowatchd-log
+          shellcheck -S warning iowatchd-log iowatchd-notify
 
   package-check:
     runs-on: ubuntu-latest

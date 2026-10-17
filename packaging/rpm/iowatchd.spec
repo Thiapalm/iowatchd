@@ -42,6 +42,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix} \
 %config(noreplace) %{_sysconfdir}/logrotate.d/iowatchd
 %{_bindir}/iowatchd
 %{_bindir}/iowatchd-log
+%{_bindir}/iowatchd-notify
 %{_unitdir}/iowatchd.service
 %{_mandir}/man1/iowatchd-log.1*
 %{_mandir}/man5/iowatchd.conf.5*

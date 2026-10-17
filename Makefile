@@ -30,7 +30,8 @@ test:
 install:
 	@test -x $(BIN) || { echo "run 'make' first (or set BIN=)" >&2; exit 1; }
 	$(INSTALL) -D -m 755 $(BIN) $(DESTDIR)$(BINDIR)/iowatchd
-	$(INSTALL) -D -m 755 iowatchd-log $(DESTDIR)$(BINDIR)/iowatchd-log
+		$(INSTALL) -D -m 755 iowatchd-log $(DESTDIR)$(BINDIR)/iowatchd-log
+	$(INSTALL) -D -m 755 iowatchd-notify $(DESTDIR)$(BINDIR)/iowatchd-notify
 	$(INSTALL) -D -m 644 man/iowatchd.8 $(DESTDIR)$(MANDIR)/man8/iowatchd.8
 	$(INSTALL) -D -m 644 man/iowatchd-log.1 $(DESTDIR)$(MANDIR)/man1/iowatchd-log.1
 	$(INSTALL) -D -m 644 man/iowatchd.conf.5 $(DESTDIR)$(MANDIR)/man5/iowatchd.conf.5
@@ -50,7 +51,7 @@ endif
 
 # The configuration file is left in place on purpose.
 uninstall:
-	rm -f $(DESTDIR)$(BINDIR)/iowatchd $(DESTDIR)$(BINDIR)/iowatchd-log
+	rm -f $(DESTDIR)$(BINDIR)/iowatchd $(DESTDIR)$(BINDIR)/iowatchd-log $(DESTDIR)$(BINDIR)/iowatchd-notify
 	rm -f $(DESTDIR)$(MANDIR)/man8/iowatchd.8 $(DESTDIR)$(MANDIR)/man1/iowatchd-log.1 \
 	  $(DESTDIR)$(MANDIR)/man5/iowatchd.conf.5
 	rm -f $(DESTDIR)$(BASHCOMPDIR)/iowatchd $(DESTDIR)$(ZSHCOMPDIR)/_iowatchd \

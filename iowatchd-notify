@@ -1,0 +1,49 @@
+#!/bin/sh
+# iowatchd-notify - desktop pop-up for iowatchd's notify_command.
+#
+# Enable it in /etc/iowatchd.conf:
+#     notify_command = /usr/bin/iowatchd-notify
+# then: sudo systemctl reload iowatchd
+#
+# iowatchd runs as root, which has no desktop session, so this script sends
+# the pop-up to every logged-in user's session bus (/run/user/<uid>/bus)
+# using notify-send. It reads the IOWATCHD_* variables set by iowatchd.
+
+command -v notify-send >/dev/null 2>&1 || exit 0
+
+# Alerts repeat while IO stays high: show at most one pop-up per minute.
+# Recovery pop-ups are always shown.
+STAMP=/run/iowatchd-notify.stamp
+if [ "$IOWATCHD_EVENT" = alert ]; then
+    now=$(date +%s)
+    last=$(cat "$STAMP" 2>/dev/null || echo 0)
+    [ $((now - last)) -ge 60 ] || exit 0
+    { echo "$now" > "$STAMP"; } 2>/dev/null
+fi
+
+if [ "$IOWATCHD_EVENT" = alert ]; then
+    urgency=critical
+    summary="High disk IO on $IOWATCHD_DEVICE ($IOWATCHD_UTIL%)"
+    # Keep only the process list (after the first " | "), and the top entries.
+    body=${IOWATCHD_MESSAGE#* | }
+    [ "$body" = "$IOWATCHD_MESSAGE" ] && body=""
+    body=$(printf '%s' "$body" | sed 's/ cmd="[^"]*"//g; s/ | /\n/g' | head -n 3)
+else
+    urgency=low
+    summary="Disk IO back to normal on $IOWATCHD_DEVICE"
+    body="$IOWATCHD_MESSAGE"
+fi
+# notify-send interprets markup in the body.
+body=$(printf '%s' "$body" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
+for bus in /run/user/*/bus; do
+    [ -S "$bus" ] || continue
+    uid=${bus#/run/user/}
+    uid=${uid%/bus}
+    [ "$uid" -gt 0 ] 2>/dev/null || continue
+    user=$(id -nu "$uid" 2>/dev/null) || continue
+    runuser -u "$user" -- env "DBUS_SESSION_BUS_ADDRESS=unix:path=$bus" \
+        notify-send --app-name=iowatchd --urgency="$urgency" \
+        --icon=drive-harddisk "$summary" "$body" >/dev/null 2>&1 &
+done
+wait
