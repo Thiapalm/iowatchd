@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `--report` now includes a diagnosis (slow disk vs. busy disk, victims vs. causes) and, when `smartctl` is available, SMART warnings (`smart = auto|off`).
+
 ## [0.4.2] - 2026-10-17
 
 ### Added

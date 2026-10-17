@@ -32,7 +32,7 @@ If the old installation (`ssd-io-monitor`) exists, `install.sh` removes it. Man 
     iowatchd --once                 one measurement, then exit
     iowatchd --once --json          same, as a JSON line
     iowatchd --list-devices         list disks (marks the auto choice)
-    iowatchd --report --since 7d    who caused the most alerts (needs log_file)
+    iowatchd --report --since 7d    who caused the most alerts + diagnosis (needs log_file)
     iowatchd --check-config         validate and print the configuration
     iowatchd -d nvme0n1 -t 60       override disk and threshold
     man iowatchd                    full manual
@@ -51,6 +51,41 @@ Example log entries:
 
     ALERT IO=94% on sda (await=12.3ms queue=3.1 read=0KB/s write=177.4MB/s psi=8.0%) | 1) dd pid=29847 user=thiago unit=app-konsole-1521 R=0KB/s W=177.4MB/s cmd="dd if=..." | 2) ...
     IO back to normal: 0% on sda
+
+## Report and diagnosis
+
+`iowatchd --report` summarizes the log (default: last 24 h; `--since 7d`, `--json` for machines) and tells **whether the disk is busy or sick**:
+
+- **Slow, not busy**: alerts with high latency (`await` ≥ 200 ms) and almost no traffic (< 1 MB/s) point to a degrading disk/SSD, not to a process. The processes listed in such alerts are victims waiting for the disk.
+- **Intermittent stalls**: bursts with high throughput and low latency show the disk is fast when it works.
+- **SMART** (optional): with `smartctl` (smartmontools) and root, it also flags reallocated, pending and uncorrectable sectors. Without them the section says `unavailable`. Disable it with `smart = off`.
+
+Example on a failing SSD (`sudo iowatchd --report`):
+
+    iowatchd report: alerts in the last 1d (from /var/log/iowatchd.log)
+    alerts: 66   peak IO: 100%   first: 2026-10-17 12:13:45   last: 2026-10-17 20:49:24
+
+    Diagnosis:
+      - 47 of 66 alerts (71%) show high latency (await >= 200 ms) with almost no traffic (< 1 MB/s): the disk is slow, not busy. This points to a degrading disk/SSD (bad cells, retries) rather than to any process.
+      - await averaged 968 ms (peak 2018 ms); IO pressure (psi) peaked at 99%, so tasks were really blocked.
+      - 1 alert(s) had high throughput with low latency: the disk is fast when it works, so the problem is intermittent stalls.
+      - Processes listed with only a few KB/s are victims waiting for the disk, not the cause.
+
+    === SMART (sda) ===
+      WARNING: the disk reports sector problems:
+          5 Reallocated_Sector_Ct = 2
+          197 Current_Pending_Sector = 2
+      Back up your data now and consider replacing the disk. ...
+
+    Top offenders (by number of alerts they appeared in):
+       #  process              unit                     alerts     avg IO    peak IO
+       1  khugepaged           -                            20    210KB/s    255KB/s
+       2  MainThread           app-org.kde.konsole-2189     15    2.6MB/s   37.6MB/s
+
+On a healthy disk with a real heavy writer the diagnosis section is omitted and the top offenders are the cause. Without root the SMART section reads:
+
+    === SMART (sda) ===
+      unavailable (could not read SMART data; try: sudo iowatchd --report ...)
 
 ## Configuration
 

@@ -67,6 +67,7 @@ fn main() {
             cli.since.unwrap_or(report::DEFAULT_SINCE_SECS),
             cfg.top_n,
             cli.json,
+            cfg.smart,
         ));
     }
 

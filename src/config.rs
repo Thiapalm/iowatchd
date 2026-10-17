@@ -34,6 +34,8 @@ pub struct Config {
     /// Shell command run on every alert and recovery (`None` disables it).
     /// It receives the details in `IOWATCHD_*` environment variables.
     pub notify_command: Option<String>,
+    /// `--report` also reads the disk's SMART data through `smartctl`.
+    pub smart: bool,
 }
 
 impl Default for Config {
@@ -51,6 +53,7 @@ impl Default for Config {
             log_max_bytes: 5 * 1024 * 1024,
             log_json: false,
             notify_command: None,
+            smart: true,
         }
     }
 }
@@ -99,6 +102,17 @@ impl Config {
                     cfg.notify_command = (!value.is_empty()).then(|| value.to_string());
                     true
                 }
+                "smart" => match value {
+                    "auto" => {
+                        cfg.smart = true;
+                        true
+                    }
+                    "off" => {
+                        cfg.smart = false;
+                        true
+                    }
+                    _ => false,
+                },
                 "log_max_mb" => value
                     .parse::<u64>()
                     .map(|v| cfg.log_max_bytes = v * 1024 * 1024)

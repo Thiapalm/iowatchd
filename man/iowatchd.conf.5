@@ -42,6 +42,11 @@ Minimum seconds between reports while IO stays high. Default 10.
 .B log_file
 Log file path; empty disables file logging. Default \fI/var/log/iowatchd.log\fR.
 .TP
+.B smart
+\fBauto\fR (default) or \fBoff\fR. With \fBauto\fR, \fB\-\-report\fR also runs
+\fBsmartctl \-A\fR on the disk (needs smartmontools and root) and flags
+reallocated, pending and uncorrectable sectors. Skipped silently if unavailable.
+.TP
 .B log_max_mb
 Size in MB before rotating to \fI<file>.1\fR. \fB0\fR disables built-in
 rotation (use \fBlogrotate\fR(8)). Default 5.
