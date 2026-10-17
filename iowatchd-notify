@@ -2,7 +2,7 @@
 # iowatchd-notify - desktop pop-up for iowatchd's notify_command.
 #
 # Enable it in /etc/iowatchd.conf:
-#     notify_command = /usr/bin/iowatchd-notify
+#     notify_command = iowatchd-notify
 # then: sudo systemctl reload iowatchd
 #
 # iowatchd runs as root, which has no desktop session, so this script sends

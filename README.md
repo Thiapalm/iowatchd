@@ -62,7 +62,7 @@ Set `notify_command` to run any command on every alert and recovery. It receives
 
     notify_command = logger -t iowatchd "$IOWATCHD_MESSAGE"
 
-For desktop pop-ups use the bundled helper: `notify_command = /usr/bin/iowatchd-notify` (shows the top processes on every logged-in desktop session, throttled to one alert per minute).
+For desktop pop-ups use the bundled helper: `notify_command = iowatchd-notify` (shows the top processes on every logged-in desktop session, throttled to one alert per minute).
 
 ## Development
 
