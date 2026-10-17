@@ -1,85 +1,84 @@
-.TH IOWATCHD 8 "outubro 2026" "iowatchd 0.1.0" "Comandos de administracao"
-.SH NOME
-iowatchd \- monitora o uso de IO do disco e registra quais processos o consomem
-.SH SINOPSE
+.TH IOWATCHD 8 "October 2026" "iowatchd 0.1.0" "System Administration"
+.SH NAME
+iowatchd \- monitor disk IO usage and log which processes consume it
+.SH SYNOPSIS
 .B iowatchd
-[\fIOPCOES\fR]
-.SH DESCRICAO
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
 .B iowatchd
-mede periodicamente a utilizacao de IO de um disco (campo \fBio_ticks\fR de
-\fI/proc/diskstats\fR, equivalente ao \fB%util\fR do \fBiostat\fR(1)). Quando a
-utilizacao fica acima do limite configurado, mede o IO de cada processo
-(\fI/proc/<pid>/io\fR) e registra os que mais leem e escrevem, com nome, PID,
-usuario, taxas e linha de comando.
+periodically measures the IO utilization of a disk (the \fBio_ticks\fR field of
+\fI/proc/diskstats\fR, equivalent to \fB%util\fR in \fBiostat\fR(1)). When the
+utilization goes above the configured threshold, it measures the IO of every
+process (\fI/proc/<pid>/io\fR) and logs the ones doing the most reads and
+writes, with name, PID, user, rates and command line.
 .PP
-O registro vai para a saida padrao (capturada pelo journald) e para um arquivo
-de log com rotacao simples. Para enxergar todos os processos e necessario
-executar como root.
-.SH OPCOES
+Entries go to standard output (captured by journald) and to a log file with
+simple rotation. Seeing all processes requires running as root.
+.SH OPTIONS
 .TP
-\fB\-c\fR, \fB\-\-config\fR \fIARQUIVO\fR
-Arquivo de configuracao. Padrao: \fI/etc/iowatchd.conf\fR, se existir.
+\fB\-c\fR, \fB\-\-config\fR \fIFILE\fR
+Configuration file. Default: \fI/etc/iowatchd.conf\fR, if it exists.
 .TP
-\fB\-d\fR, \fB\-\-device\fR \fIDISCO\fR
-Disco a monitorar (\fBsda\fR, \fBnvme0n1\fR...). Padrao \fBauto\fR: disco fisico
-que contem a particao raiz.
+\fB\-d\fR, \fB\-\-device\fR \fIDISK\fR
+Disk to monitor (\fBsda\fR, \fBnvme0n1\fR...). Default \fBauto\fR: the physical
+disk that holds the root partition.
 .TP
 \fB\-t\fR, \fB\-\-threshold\fR \fIPCT\fR
-Limite de uso de IO, em %, que dispara o registro (1 a 100). Padrao 80.
+IO usage, in %, that triggers logging (1 to 100). Default 80.
 .TP
-\fB\-i\fR, \fB\-\-interval\fR \fISEG\fR
-Segundos entre amostras (minimo 1). Padrao 2.
+\fB\-i\fR, \fB\-\-interval\fR \fISEC\fR
+Seconds between samples (minimum 1). Default 2.
 .TP
 \fB\-n\fR, \fB\-\-top\fR \fIN\fR
-Numero de processos listados em cada registro. Padrao 5.
+Number of processes listed in each report. Default 5.
 .TP
 \fB\-o\fR, \fB\-\-once\fR
-Faz uma unica medicao, imprime o resultado na saida padrao e termina.
+Take a single measurement, print the result to standard output and exit.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
-Mostra a ajuda e termina.
+Show help and exit.
 .TP
 \fB\-V\fR, \fB\-\-version\fR
-Mostra a versao e termina.
+Show the version and exit.
 .PP
-As opcoes de linha de comando tem prioridade sobre o arquivo de configuracao.
-.SH CONFIGURACAO
-Arquivo de linhas \fBchave = valor\fR; \fB#\fR inicia comentario. Chaves:
+Command-line options take precedence over the configuration file.
+.SH CONFIGURATION
+A file of \fBkey = value\fR lines; \fB#\fR starts a comment. Keys:
 \fBdevice\fR, \fBthreshold\fR, \fBclear_threshold\fR, \fBinterval\fR,
 \fBtrigger_samples\fR, \fBprocess_window\fR, \fBtop_n\fR, \fBcooldown\fR,
-\fBlog_file\fR e \fBlog_max_mb\fR. Veja os comentarios em \fI/etc/iowatchd.conf\fR.
-.SH SINAIS
+\fBlog_file\fR and \fBlog_max_mb\fR. See the comments in \fI/etc/iowatchd.conf\fR.
+.SH SIGNALS
 .TP
 .B SIGHUP
-Recarrega a configuracao sem reiniciar. Se a nova configuracao for invalida,
-mantem a atual.
+Reload the configuration without restarting. If the new configuration is
+invalid, the current one is kept.
 .TP
 .BR SIGTERM ", " SIGINT
-Encerra de forma limpa.
-.SH "CODIGOS DE SAIDA"
+Stop cleanly.
+.SH EXIT STATUS
 .TP
 .B 0
-Sucesso.
+Success.
 .TP
 .B 1
-Erro de execucao (configuracao ilegivel, disco inexistente).
+Runtime error (unreadable configuration, missing disk).
 .TP
 .B 2
-Erro de uso (opcao invalida).
-.SH ARQUIVOS
+Usage error (invalid option).
+.SH FILES
 .TP
 .I /etc/iowatchd.conf
-Configuracao.
+Configuration.
 .TP
 .I /var/log/iowatchd.log
-Log de alertas.
-.SH EXEMPLOS
+Alert log.
+.SH EXAMPLES
 .nf
 iowatchd \-\-once
 iowatchd \-d nvme0n1 \-t 60 \-\-once
 journalctl \-u iowatchd \-f
 .fi
-.SH "VEJA TAMBEM"
+.SH SEE ALSO
 .BR iowatchd-log (1),
 .BR iostat (1),
 .BR iotop (8)

@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Compila, instala e habilita o iowatchd como servico de sistema.
-# Detecta o init (systemd, OpenRC ou runit) automaticamente.
-# Remove tambem a instalacao antiga chamada ssd-io-monitor, se existir.
-# Uso: ./install.sh   (pede sudo apenas para as etapas de instalacao)
+# Builds, installs and enables iowatchd as a system service.
+# Detects the init system (systemd, OpenRC or runit) automatically.
+# Also removes the old installation named ssd-io-monitor, if present.
+# Usage: ./install.sh   (asks for sudo only for the install steps)
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# O cargo pode nao estar no PATH deste shell (ex.: rustup instalou em ~/.cargo/bin).
+# cargo may not be in this shell's PATH (e.g. rustup installs to ~/.cargo/bin).
 export PATH="$HOME/.cargo/bin:$PATH"
-command -v cargo >/dev/null || { echo "cargo nao encontrado; instale o Rust (rustup)." >&2; exit 1; }
+command -v cargo >/dev/null || { echo "cargo not found; install Rust (rustup)." >&2; exit 1; }
 
-# Identifica o init em execucao (nao apenas o instalado).
+# Identify the init system that is running (not just the installed one).
 detect_init() {
   if [ -d /run/systemd/system ]; then echo systemd
   elif command -v rc-service >/dev/null 2>&1 && [ -d /run/openrc ]; then echo openrc
@@ -19,11 +19,11 @@ detect_init() {
   fi
 }
 INIT=$(detect_init)
-echo "Init detectado: $INIT"
+echo "Detected init: $INIT"
 
 cargo build --release
 
-# Migracao do nome antigo (ssd-io-monitor). Preserva o log antigo.
+# Migration from the old name (ssd-io-monitor). The old log is kept.
 if [ "$INIT" = systemd ] && [ -f /etc/systemd/system/ssd-io-monitor.service ]; then
   sudo systemctl disable --now ssd-io-monitor.service || true
   sudo rm -f /etc/systemd/system/ssd-io-monitor.service
@@ -34,7 +34,7 @@ sudo install -m 755 target/release/iowatchd /usr/local/bin/iowatchd
 sudo install -m 755 iowatchd-log /usr/local/bin/iowatchd-log
 sudo install -D -m 644 man/iowatchd.8 /usr/local/share/man/man8/iowatchd.8
 sudo install -D -m 644 man/iowatchd-log.1 /usr/local/share/man/man1/iowatchd-log.1
-# Nao sobrescreve uma configuracao ja editada. device=auto detecta o disco da raiz.
+# Does not overwrite an already edited configuration. device=auto detects the root disk.
 [ -f /etc/iowatchd.conf ] || sudo install -m 644 config.conf /etc/iowatchd.conf
 
 case "$INIT" in
@@ -53,15 +53,15 @@ case "$INIT" in
     SVDIR=/etc/sv; [ -d /etc/runit/sv ] && SVDIR=/etc/runit/sv
     sudo install -d "$SVDIR/iowatchd"
     sudo install -m 755 init/runit/run "$SVDIR/iowatchd/run"
-    # Diretorio de servicos ativos varia conforme a distro.
+    # The active-services directory varies by distro.
     for d in /var/service /etc/service /run/runit/service; do
       [ -d "$d" ] && { sudo ln -sfn "$SVDIR/iowatchd" "$d/iowatchd"; break; }
     done
     ;;
   *)
-    echo "Init nao suportado. Binario e configuracao instalados; configure a" >&2
-    echo "inicializacao manualmente: /usr/local/bin/iowatchd -c /etc/iowatchd.conf" >&2
+    echo "Unsupported init. Binary and configuration were installed; set up" >&2
+    echo "autostart manually: /usr/local/bin/iowatchd -c /etc/iowatchd.conf" >&2
     ;;
 esac
 
-echo "Instalado. Ajuda: iowatchd --help | man iowatchd | iowatchd-log (-f acompanha, -s status)"
+echo "Installed. Help: iowatchd --help | man iowatchd | iowatchd-log (-f follow, -s status)"

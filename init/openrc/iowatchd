@@ -1,12 +1,12 @@
 #!/sbin/openrc-run
-# Servico OpenRC do iowatchd.
+# OpenRC service for iowatchd.
 
-description="Monitor de uso de IO do disco"
+description="Disk IO usage monitor"
 command="/usr/local/bin/iowatchd"
 command_args="-c /etc/iowatchd.conf"
 supervisor="supervise-daemon"
 extra_started_commands="reload"
-# Prioridade minima de CPU e IO.
+# Lowest CPU and IO priority.
 start_stop_daemon_args="--nicelevel 19 --ionice 3"
 output_log="/var/log/iowatchd.out"
 error_log="/var/log/iowatchd.out"
@@ -16,7 +16,7 @@ depend() {
 }
 
 reload() {
-	ebegin "Recarregando $RC_SVCNAME"
+	ebegin "Reloading $RC_SVCNAME"
 	supervise-daemon "$RC_SVCNAME" --signal HUP
 	eend $?
 }

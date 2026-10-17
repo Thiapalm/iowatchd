@@ -1,5 +1,5 @@
 [Unit]
-Description=iowatchd - monitor de uso de IO do disco
+Description=iowatchd - disk IO usage monitor
 After=local-fs.target
 
 [Service]
@@ -9,8 +9,8 @@ ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5
 
-# Roda como root para ler /proc/<pid>/io de todos os processos,
-# mas com privilegios e recursos reduzidos ao minimo.
+# Runs as root to read /proc/<pid>/io of every process,
+# but with privileges and resources reduced to the minimum.
 Nice=19
 IOSchedulingClass=idle
 CPUSchedulingPolicy=idle

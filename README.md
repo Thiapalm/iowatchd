@@ -1,47 +1,51 @@
 # iowatchd
 
-Monitora o uso de IO do disco (`%util`, igual ao `iostat -x`) e, quando passa de 80%, registra os processos que mais leem/escrevem.
+Monitors disk IO usage (`%util`, the same as `iostat -x`) and, when it goes above 80%, logs the processes doing the most reads/writes.
 
-- Rust puro, sem dependências: ~360 KB, ~2,5 MB de RAM, CPU ~0%.
-- Lê só `/proc/diskstats` a cada 2 s; a varredura de `/proc/<pid>/io` ocorre apenas durante o alerta.
-- Log no journald e em `/var/log/iowatchd.log` (rotação em 5 MB).
-- Serviço de boot detectado automaticamente: systemd (testado), OpenRC e runit (não testados). Em outros inits, o `install.sh` instala só o binário e indica o comando.
-- Disco detectado automaticamente (`device = auto`): o disco físico que contém `/`, mesmo com partições, LVM ou LUKS (SATA, NVMe etc.).
-- No systemd: `Nice=19`, IO `idle`, `CPUQuota=5%`, `MemoryMax=20M`.
+- Pure Rust, no dependencies: ~360 KB binary, ~2.5 MB of RAM, ~0% CPU.
+- Reads only `/proc/diskstats` every 2 s; the `/proc/<pid>/io` scan happens only during an alert.
+- Logs to journald and to `/var/log/iowatchd.log` (rotated at 5 MB).
+- Boot service picked automatically: systemd (tested), OpenRC and runit (untested). On other init systems, `install.sh` installs only the binary and prints the command to run.
+- Automatic disk detection (`device = auto`): the physical disk that holds `/`, even with partitions, LVM or LUKS (SATA, NVMe, etc.).
+- Under systemd: `Nice=19`, idle IO class, `CPUQuota=5%`, `MemoryMax=20M`.
 
-## Instalação
+## Installation
 
     ./install.sh
 
-Se existir a instalação antiga (`ssd-io-monitor`), ela é removida.
+If the old installation (`ssd-io-monitor`) exists, it is removed.
 
-## Uso
+## Usage
 
-    iowatchd --help                 opções
-    iowatchd --once                 uma medição e sai
-    iowatchd -d nvme0n1 -t 60       sobrescreve disco e limite
-    man iowatchd                    manual completo
+    iowatchd --help                 options
+    iowatchd --once                 one measurement, then exit
+    iowatchd -d nvme0n1 -t 60       override disk and threshold
+    man iowatchd                    full manual
 
-Opções (`-c`, `-d`, `-t`, `-i`, `-n`, `-o`, `-h`, `-V`) têm prioridade sobre o arquivo de configuração. Códigos de saída: 0 sucesso, 1 erro de execução, 2 erro de uso. `SIGHUP` recarrega a configuração (`sudo systemctl reload iowatchd`); `SIGTERM`/`SIGINT` encerram de forma limpa.
+Options (`-c`, `-d`, `-t`, `-i`, `-n`, `-o`, `-h`, `-V`) take precedence over the configuration file. Exit codes: 0 success, 1 runtime error, 2 usage error. `SIGHUP` reloads the configuration (`sudo systemctl reload iowatchd`); `SIGTERM`/`SIGINT` stop it cleanly.
 
-Atalho para os logs: `iowatchd-log` (últimos alertas), `iowatchd-log -f` (tempo real), `iowatchd-log -s` (status).
+Log shortcut: `iowatchd-log` (latest alerts), `iowatchd-log -f` (follow), `iowatchd-log -s` (status).
 
-Comandos equivalentes:
+Equivalent commands:
 
     systemctl status iowatchd
     journalctl -u iowatchd -f
     tail -f /var/log/iowatchd.log
 
-Exemplo de registro:
+Example log entries:
 
-    ALERTA IO=94% em sda | 1) dd pid=29847 user=thiago R=0KB/s W=177.4MB/s cmd="dd if=..." | 2) ...
-    IO normalizado: 0% em sda
+    ALERT IO=94% on sda | 1) dd pid=29847 user=thiago R=0KB/s W=177.4MB/s cmd="dd if=..." | 2) ...
+    IO back to normal: 0% on sda
 
-## Configuração
+## Configuration
 
-`/etc/iowatchd.conf` (modelo em `config.conf`). Após editar: `sudo systemctl restart iowatchd`.
+`/etc/iowatchd.conf` (template in `config.conf`). After editing: `sudo systemctl restart iowatchd`.
 
-## Desenvolvimento
+## Development
 
     cargo test
     cargo build --release
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -1,15 +1,15 @@
 //! iowatchd
 //!
-//! Monitora o percentual de uso de IO de um disco (via `/proc/diskstats`) e,
-//! quando ele fica acima do limite configurado, registra quais processos estao
-//! gerando mais leitura/escrita (via `/proc/<pid>/io`).
+//! Monitors the IO utilization of a disk (via `/proc/diskstats`) and, when it
+//! goes above the configured threshold, logs which processes are generating
+//! the most reads/writes (via `/proc/<pid>/io`).
 //!
-//! Principios de projeto (consumo minimo de recursos):
-//! * Sem dependencias externas e sem runtime assincrono.
-//! * O loop principal le um unico arquivo pequeno e dorme (`nap`)
-//!   entre amostras: CPU praticamente zero.
-//! * A varredura de processos, que e a parte "cara", so acontece quando o
-//!   limite e ultrapassado.
+//! Design principles (minimal resource usage):
+//! * No external dependencies and no async runtime.
+//! * The main loop reads a single small file and sleeps (`nap`) between
+//!   samples: practically zero CPU.
+//! * The process scan, which is the "expensive" part, only happens when the
+//!   threshold is exceeded.
 
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
@@ -19,34 +19,34 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 // ---------------------------------------------------------------------------
-// Configuracao
+// Configuration
 // ---------------------------------------------------------------------------
 
-/// Parametros do monitor. Valores padrao em [`Config::default`]; podem ser
-/// sobrescritos por um arquivo `chave = valor` (veja `config.conf`).
+/// Monitor parameters. Defaults are in [`Config::default`]; they can be
+/// overridden by a `key = value` file (see `config.conf`).
 #[derive(Debug, Clone, PartialEq)]
 struct Config {
-    /// Nome do dispositivo em `/proc/diskstats` (ex.: `sda`, `nvme0n1`) ou
-    /// `auto` para detectar o disco fisico que contem a particao raiz.
+    /// Device name in `/proc/diskstats` (e.g. `sda`, `nvme0n1`) or `auto`
+    /// to detect the physical disk that holds the root partition.
     device: String,
-    /// Uso de IO (%) a partir do qual os processos sao registrados.
+    /// IO utilization (%) at or above which processes are logged.
     threshold: f64,
-    /// Uso de IO (%) abaixo do qual consideramos o IO normalizado.
-    /// Ser menor que `threshold` evita ficar alternando entre os estados.
+    /// IO utilization (%) below which IO is considered back to normal.
+    /// Keeping it below `threshold` avoids flapping between states.
     clear_threshold: f64,
-    /// Segundos entre amostras do disco.
+    /// Seconds between disk samples.
     interval: u64,
-    /// Amostras consecutivas acima do limite necessarias para disparar.
+    /// Consecutive samples above the threshold required to trigger.
     trigger_samples: u32,
-    /// Janela (s) para medir o IO por processo quando disparado.
+    /// Window (s) used to measure per-process IO once triggered.
     process_window: u64,
-    /// Quantos processos listar por registro.
+    /// How many processes to list per report.
     top_n: usize,
-    /// Intervalo minimo (s) entre registros enquanto o IO segue alto.
+    /// Minimum interval (s) between reports while IO stays high.
     cooldown: u64,
-    /// Arquivo de log adicional ao stdout/journald (`None` desativa).
+    /// Log file in addition to stdout/journald (`None` disables it).
     log_file: Option<PathBuf>,
-    /// Tamanho maximo do arquivo de log (bytes) antes de rotacionar.
+    /// Maximum log file size (bytes) before rotating.
     log_max_bytes: u64,
 }
 
@@ -68,20 +68,20 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Aplica o conteudo de um arquivo de configuracao sobre os padroes.
-    /// Linhas invalidas sao ignoradas e devolvidas como avisos.
+    /// Applies the contents of a configuration file on top of the defaults.
+    /// Invalid lines are ignored and returned as warnings.
     fn parse(text: &str) -> (Config, Vec<String>) {
         let mut cfg = Config::default();
         let mut warnings = Vec::new();
 
         for (n, raw) in text.lines().enumerate() {
-            // Remove comentarios e espacos.
+            // Strip comments and whitespace.
             let line = raw.split('#').next().unwrap_or("").trim();
             if line.is_empty() {
                 continue;
             }
             let Some((key, value)) = line.split_once('=') else {
-                warnings.push(format!("linha {}: esperado 'chave = valor'", n + 1));
+                warnings.push(format!("line {}: expected 'key = value'", n + 1));
                 continue;
             };
             let (key, value) = (key.trim(), value.trim());
@@ -107,12 +107,12 @@ impl Config {
                     .map(|v| cfg.log_max_bytes = v * 1024 * 1024)
                     .is_ok(),
                 _ => {
-                    warnings.push(format!("linha {}: chave desconhecida '{}'", n + 1, key));
+                    warnings.push(format!("line {}: unknown key '{}'", n + 1, key));
                     true
                 }
             };
             if !ok {
-                warnings.push(format!("linha {}: valor invalido para '{}'", n + 1, key));
+                warnings.push(format!("line {}: invalid value for '{}'", n + 1, key));
             }
         }
 
@@ -120,7 +120,7 @@ impl Config {
         (cfg, warnings)
     }
 
-    /// Garante valores seguros (evita loop sem espera ou histerese invertida).
+    /// Enforces safe values (avoids a loop without sleeping or inverted hysteresis).
     fn normalize(&mut self) {
         self.interval = self.interval.max(1);
         self.process_window = self.process_window.max(1);
@@ -132,7 +132,7 @@ impl Config {
 }
 
 // ---------------------------------------------------------------------------
-// Log (stdout/journald + arquivo com rotacao simples)
+// Logging (stdout/journald + file with simple rotation)
 // ---------------------------------------------------------------------------
 
 struct Logger {
@@ -141,13 +141,13 @@ struct Logger {
 }
 
 impl Logger {
-    /// Escreve uma linha no stdout (capturado pelo journald, que ja
-    /// adiciona data/hora) e no arquivo de log (com data/hora propria).
+    /// Writes a line to stdout (captured by journald, which already adds a
+    /// timestamp) and to the log file (with its own timestamp).
     fn log(&self, msg: &str) {
         println!("{msg}");
         let Some(path) = &self.file else { return };
 
-        // Rotacao: ao passar do limite, o arquivo atual vira `<arquivo>.1`.
+        // Rotation: past the size limit, the current file becomes `<file>.1`.
         if fs::metadata(path).map(|m| m.len() > self.max_bytes).unwrap_or(false) {
             let mut old = path.clone().into_os_string();
             old.push(".1");
@@ -158,12 +158,12 @@ impl Logger {
             Ok(mut f) => {
                 let _ = writeln!(f, "{} {}", timestamp(), msg);
             }
-            Err(e) => eprintln!("aviso: nao foi possivel escrever em {}: {e}", path.display()),
+            Err(e) => eprintln!("warning: could not write to {}: {e}", path.display()),
         }
     }
 }
 
-/// Estrutura `struct tm` da libc (layout de Linux 64 bits).
+/// libc `struct tm` (64-bit Linux layout).
 #[repr(C)]
 struct Tm {
     sec: i32,
@@ -183,9 +183,9 @@ extern "C" {
     fn localtime_r(t: *const i64, out: *mut Tm) -> *mut Tm;
 }
 
-/// Data/hora local no formato `YYYY-MM-DD HH:MM:SS`.
-/// Usa `localtime_r` da libc (ja linkada pela std) para respeitar o fuso
-/// horario do sistema sem precisar de bibliotecas externas.
+/// Local date/time formatted as `YYYY-MM-DD HH:MM:SS`.
+/// Uses libc's `localtime_r` (already linked by std) to honor the system time
+/// zone without needing external libraries.
 fn timestamp() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -195,7 +195,7 @@ fn timestamp() -> String {
         sec: 0, min: 0, hour: 0, mday: 0, mon: 0, year: 0,
         wday: 0, yday: 0, isdst: 0, gmtoff: 0, zone: std::ptr::null(),
     };
-    // SAFETY: `tm` e valido e gravavel durante a chamada; `secs` e lido apenas.
+    // SAFETY: `tm` is valid and writable for the duration of the call; `secs` is only read.
     let ok = unsafe { !localtime_r(&secs, &mut tm).is_null() };
     if !ok {
         return secs.to_string();
@@ -207,17 +207,17 @@ fn timestamp() -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Deteccao automatica do disco
+// Automatic disk detection
 // ---------------------------------------------------------------------------
 
-/// Procura em `/proc/self/mountinfo` a origem (ex.: `/dev/mapper/vg-root`)
-/// do sistema de arquivos montado em `/`. Se houver varias montagens em `/`,
-/// vale a ultima (a que esta por cima).
+/// Finds in `/proc/self/mountinfo` the source (e.g. `/dev/mapper/vg-root`) of
+/// the filesystem mounted on `/`. If there are several mounts on `/`, the
+/// last one wins (the one on top).
 fn parse_root_source(mountinfo: &str) -> Option<String> {
     mountinfo
         .lines()
         .filter_map(|line| {
-            // Formato: "... ponto_de_montagem opcoes... - tipo origem opcoes"
+            // Format: "... mount_point options... - fstype source options"
             let (head, tail) = line.split_once(" - ")?;
             if head.split_whitespace().nth(4)? != "/" {
                 return None;
@@ -228,10 +228,10 @@ fn parse_root_source(mountinfo: &str) -> Option<String> {
         .last()
 }
 
-/// Dado o nome de um dispositivo de bloco (particao, LVM, LUKS...), devolve
-/// o disco fisico de baixo, usando a hierarquia do sysfs:
-/// * dispositivos empilhados (dm, md) listam seus componentes em `slaves/`;
-/// * particoes tem o arquivo `partition` e ficam dentro do diretorio do disco.
+/// Given a block device name (partition, LVM, LUKS...), returns the physical
+/// disk underneath it using the sysfs hierarchy:
+/// * stacked devices (dm, md) list their components in `slaves/`;
+/// * partitions have a `partition` file and live inside the disk's directory.
 fn physical_disk(name: &str, depth: u32) -> Option<String> {
     let sys = PathBuf::from("/sys/class/block").join(name);
     if depth > 8 || !sys.exists() {
@@ -250,8 +250,8 @@ fn physical_disk(name: &str, depth: u32) -> Option<String> {
     Some(name.to_string())
 }
 
-/// Detecta o disco a monitorar: primeiro o que contem `/`; se nao for
-/// possivel (ex.: overlayfs), o primeiro disco com hardware real.
+/// Detects the disk to monitor: first the one holding `/`; if that is not
+/// possible (e.g. overlayfs), the first disk backed by real hardware.
 fn detect_device() -> Option<String> {
     let from_root = fs::read_to_string("/proc/self/mountinfo")
         .ok()
@@ -262,7 +262,7 @@ fn detect_device() -> Option<String> {
     if from_root.is_some() {
         return from_root;
     }
-    // Discos reais tem `device/`; loop, ram e zram sao virtuais e nao tem.
+    // Real disks have a `device/` entry; loop, ram and zram are virtual and do not.
     let mut disks: Vec<String> = fs::read_dir("/sys/block")
         .ok()?
         .flatten()
@@ -274,14 +274,14 @@ fn detect_device() -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Uso de IO do disco
+// Disk IO utilization
 // ---------------------------------------------------------------------------
 
-/// Extrai de `/proc/diskstats` o campo `io_ticks` (ms em que o disco teve IO
-/// em andamento) do dispositivo informado.
+/// Extracts the `io_ticks` field (ms during which the disk had IO in flight)
+/// of the given device from `/proc/diskstats`.
 ///
-/// Formato de cada linha: `major minor nome campo1 campo2 ...`, sendo
-/// `io_ticks` o 10o campo de estatistica, ou seja, o indice 12 da linha.
+/// Each line is `major minor name field1 field2 ...`, where `io_ticks` is the
+/// 10th statistics field, i.e. index 12 of the line.
 fn parse_io_ticks(diskstats: &str, device: &str) -> Option<u64> {
     diskstats.lines().find_map(|line| {
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -297,8 +297,8 @@ fn read_io_ticks(device: &str) -> Option<u64> {
     parse_io_ticks(&fs::read_to_string("/proc/diskstats").ok()?, device)
 }
 
-/// Percentual de uso (equivalente ao `%util` do `iostat -x`):
-/// fracao do tempo decorrido em que o disco esteve ocupado.
+/// Utilization percentage (equivalent to `%util` in `iostat -x`):
+/// the fraction of elapsed time during which the disk was busy.
 fn utilization(delta_ticks_ms: u64, elapsed_ms: u64) -> f64 {
     if elapsed_ms == 0 {
         return 0.0;
@@ -307,19 +307,19 @@ fn utilization(delta_ticks_ms: u64, elapsed_ms: u64) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// IO por processo
+// Per-process IO
 // ---------------------------------------------------------------------------
 
-/// Bytes lidos/escritos de fato no armazenamento por um processo
-/// (`read_bytes` e `write_bytes` de `/proc/<pid>/io`; ignora cache de pagina).
+/// Bytes actually read from / written to storage by a process
+/// (`read_bytes` and `write_bytes` from `/proc/<pid>/io`; page cache is ignored).
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 struct ProcIo {
     read: u64,
     write: u64,
 }
 
-/// Le os contadores de IO de um PID. Retorna `None` se o processo terminou
-/// ou se nao temos permissao.
+/// Reads the IO counters of a PID. Returns `None` if the process exited or
+/// we lack permission.
 fn read_proc_io(pid: u32) -> Option<ProcIo> {
     parse_proc_io(&fs::read_to_string(format!("/proc/{pid}/io")).ok()?)
 }
@@ -338,12 +338,12 @@ fn parse_proc_io(text: &str) -> Option<ProcIo> {
     found.then_some(io)
 }
 
-/// Tira uma "foto" dos contadores de IO de todos os processos visiveis.
+/// Takes a "snapshot" of the IO counters of every visible process.
 fn snapshot_processes() -> HashMap<u32, ProcIo> {
     let mut map = HashMap::new();
     let Ok(dir) = fs::read_dir("/proc") else { return map };
     for entry in dir.flatten() {
-        // Diretorios numericos em /proc correspondem a PIDs.
+        // Numeric directories under /proc are PIDs.
         if let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) {
             if let Some(io) = read_proc_io(pid) {
                 map.insert(pid, io);
@@ -353,20 +353,20 @@ fn snapshot_processes() -> HashMap<u32, ProcIo> {
     map
 }
 
-/// Consumo de um processo durante a janela de medicao.
+/// IO done by a process during the measurement window.
 struct ProcUsage {
     pid: u32,
     read: u64,
     write: u64,
 }
 
-/// Compara duas fotos e devolve os `n` processos que mais fizeram IO,
-/// em ordem decrescente (leitura + escrita).
+/// Compares two snapshots and returns the `n` processes that did the most IO,
+/// in descending order (reads + writes).
 fn top_processes(before: &HashMap<u32, ProcIo>, after: &HashMap<u32, ProcIo>, n: usize) -> Vec<ProcUsage> {
     let mut usage: Vec<ProcUsage> = after
         .iter()
         .map(|(&pid, now)| {
-            // Processo novo na janela: parte de zero.
+            // Process started during the window: counts from zero.
             let old = before.get(&pid).copied().unwrap_or_default();
             ProcUsage {
                 pid,
@@ -381,14 +381,14 @@ fn top_processes(before: &HashMap<u32, ProcIo>, after: &HashMap<u32, ProcIo>, n:
     usage
 }
 
-/// Nome curto do processo (`/proc/<pid>/comm`).
+/// Short process name (`/proc/<pid>/comm`).
 fn process_name(pid: u32) -> String {
     fs::read_to_string(format!("/proc/{pid}/comm"))
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "?".into())
 }
 
-/// Linha de comando completa, truncada para nao poluir o log.
+/// Full command line, truncated so it does not clutter the log.
 fn process_cmdline(pid: u32) -> String {
     let raw = fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
     let text: String = String::from_utf8_lossy(&raw).replace('\0', " ").trim().to_string();
@@ -400,7 +400,7 @@ fn process_cmdline(pid: u32) -> String {
     }
 }
 
-/// Dono do processo: UID de `/proc/<pid>/status` traduzido via `/etc/passwd`.
+/// Process owner: the UID from `/proc/<pid>/status` translated via `/etc/passwd`.
 fn process_user(pid: u32, users: &HashMap<u32, String>) -> String {
     let uid = fs::read_to_string(format!("/proc/{pid}/status"))
         .ok()
@@ -415,7 +415,7 @@ fn process_user(pid: u32, users: &HashMap<u32, String>) -> String {
     }
 }
 
-/// Mapa UID -> nome a partir de `/etc/passwd`.
+/// UID -> name map built from `/etc/passwd`.
 fn load_users() -> HashMap<u32, String> {
     fs::read_to_string("/etc/passwd")
         .unwrap_or_default()
@@ -429,7 +429,7 @@ fn load_users() -> HashMap<u32, String> {
         .collect()
 }
 
-/// Formata bytes/s de forma legivel.
+/// Formats bytes/s in a human-readable way.
 fn human_rate(bytes_per_s: f64) -> String {
     const MB: f64 = 1024.0 * 1024.0;
     if bytes_per_s >= MB {
@@ -439,20 +439,20 @@ fn human_rate(bytes_per_s: f64) -> String {
     }
 }
 
-/// Mede o IO por processo durante `window` e escreve o relatorio no log.
+/// Measures per-process IO over the configured window and writes the report to the log.
 fn report_top_processes(cfg: &Config, logger: &Logger, util: f64) {
     let window = cfg.process_window;
     let before = snapshot_processes();
     let start = Instant::now();
     nap(window);
     let after = snapshot_processes();
-    // Usa o tempo real decorrido para calcular taxas corretas.
+    // Use the real elapsed time so the rates are accurate.
     let secs = start.elapsed().as_secs_f64().max(0.001);
 
     let top = top_processes(&before, &after, cfg.top_n);
     if top.is_empty() {
         logger.log(&format!(
-            "ALERTA IO={util:.0}% em {} | nenhum processo visivel com IO na janela (IO do kernel/journal?)",
+            "ALERT IO={util:.0}% on {} | no visible process did IO in the window (kernel/journal IO?)",
             cfg.device
         ));
         return;
@@ -475,40 +475,40 @@ fn report_top_processes(cfg: &Config, logger: &Logger, util: f64) {
             )
         })
         .collect();
-    logger.log(&format!("ALERTA IO={util:.0}% em {} | {}", cfg.device, list.join(" | ")));
+    logger.log(&format!("ALERT IO={util:.0}% on {} | {}", cfg.device, list.join(" | ")));
 }
 
 // ---------------------------------------------------------------------------
-// Linha de comando
+// Command line
 // ---------------------------------------------------------------------------
 
-/// Arquivo de configuracao lido quando `-c` nao e informado (se existir).
+/// Configuration file read when `-c` is not given (if it exists).
 const DEFAULT_CONFIG: &str = "/etc/iowatchd.conf";
 
 const USAGE: &str = "\
-iowatchd - monitora o uso de IO do disco e registra quais processos o consomem
+iowatchd - monitors disk IO usage and logs which processes are consuming it
 
-Uso: iowatchd [OPCOES]
+Usage: iowatchd [OPTIONS]
 
-Opcoes:
-  -c, --config ARQUIVO    arquivo de configuracao (padrao: /etc/iowatchd.conf)
-  -d, --device DISCO      disco a monitorar, ex.: sda, nvme0n1 (padrao: auto)
-  -t, --threshold PCT     limite de uso de IO em % que dispara o alerta (1-100)
-  -i, --interval SEG      segundos entre amostras (minimo 1)
-  -n, --top N             quantidade de processos listados por alerta
-  -o, --once              faz uma unica medicao, imprime e sai
-  -h, --help              mostra esta ajuda
-  -V, --version           mostra a versao
+Options:
+  -c, --config FILE       configuration file (default: /etc/iowatchd.conf)
+  -d, --device DISK       disk to monitor, e.g. sda, nvme0n1 (default: auto)
+  -t, --threshold PCT     IO usage % that triggers an alert (1-100)
+  -i, --interval SEC      seconds between samples (minimum 1)
+  -n, --top N             number of processes listed per alert
+  -o, --once              take a single measurement, print it and exit
+  -h, --help              show this help
+  -V, --version           show the version
 
-As opcoes de linha de comando tem prioridade sobre o arquivo de configuracao.
-SIGHUP recarrega a configuracao; SIGTERM/SIGINT encerram o programa.
-Codigos de saida: 0 sucesso, 1 erro de execucao, 2 erro de uso.
+Command-line options take precedence over the configuration file.
+SIGHUP reloads the configuration; SIGTERM/SIGINT stop the program.
+Exit codes: 0 success, 1 runtime error, 2 usage error.
 
-Exemplos:
-  iowatchd --once                 mede o disco da raiz por um intervalo
-  iowatchd -d nvme0n1 -t 60       monitora o nvme0n1 com limite de 60%";
+Examples:
+  iowatchd --once                 measure the root disk for one interval
+  iowatchd -d nvme0n1 -t 60       monitor nvme0n1 with a 60% threshold";
 
-/// Opcoes informadas na linha de comando; `None` significa \"nao informado\".
+/// Options given on the command line; `None` means \"not provided\".
 #[derive(Debug, Default, PartialEq)]
 struct Cli {
     config: Option<String>,
@@ -519,7 +519,7 @@ struct Cli {
     once: bool,
 }
 
-/// Resultado da leitura dos argumentos.
+/// Result of parsing the arguments.
 #[derive(Debug, PartialEq)]
 enum Parsed {
     Help,
@@ -528,25 +528,25 @@ enum Parsed {
 }
 
 impl Cli {
-    /// Interpreta os argumentos (sem o nome do programa). Aceita
-    /// `--opcao valor`, `--opcao=valor` e `-o valor`. Erros sao textos
-    /// prontos para exibir ao usuario (codigo de saida 2).
+    /// Parses the arguments (without the program name). Accepts
+    /// `--option value`, `--option=value` and `-o value`. Errors are
+    /// ready-to-display messages (exit code 2).
     fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Parsed, String> {
         let mut cli = Cli::default();
         let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
-            // Separa `--opcao=valor` em nome e valor embutido.
+            // Split `--option=value` into name and embedded value.
             let (name, inline) = match arg.split_once('=') {
                 Some((n, v)) if n.starts_with("--") => (n.to_string(), Some(v.to_string())),
                 _ => (arg.clone(), None),
             };
 
-            // Obtem o valor da opcao: embutido ou o proximo argumento.
+            // Option value: the embedded one or the next argument.
             let value = |args: &mut dyn Iterator<Item = String>| -> Result<String, String> {
-                inline.clone().or_else(|| args.next()).ok_or_else(|| format!("a opcao '{name}' requer um valor"))
+                inline.clone().or_else(|| args.next()).ok_or_else(|| format!("option '{name}' requires a value"))
             };
-            let bad = |v: &str| format!("valor invalido para '{name}': '{v}'");
+            let bad = |v: &str| format!("invalid value for '{name}': '{v}'");
 
             match name.as_str() {
                 "-h" | "--help" => return Ok(Parsed::Help),
@@ -570,31 +570,31 @@ impl Cli {
                     let v = value(&mut args)?;
                     cli.top_n = Some(v.parse().ok().filter(|&n| n >= 1).ok_or_else(|| bad(&v))?);
                 }
-                other if other.starts_with('-') => return Err(format!("opcao desconhecida '{other}'")),
-                other => return Err(format!("argumento inesperado '{other}'")),
+                other if other.starts_with('-') => return Err(format!("unknown option '{other}'")),
+                other => return Err(format!("unexpected argument '{other}'")),
             }
         }
         Ok(Parsed::Run(cli))
     }
 }
 
-/// Monta a configuracao final: padroes < arquivo < linha de comando,
-/// e resolve `device = auto`. Tambem e usada ao recarregar (SIGHUP).
+/// Builds the final configuration: defaults < file < command line, and
+/// resolves `device = auto`. Also used when reloading (SIGHUP).
 fn build_config(cli: &Cli) -> Result<Config, String> {
     let mut cfg = Config::default();
 
-    // Com -c o arquivo e obrigatorio; sem -c, usa o padrao se ele existir.
+    // With -c the file is mandatory; without it, use the default if it exists.
     let path = cli.config.as_deref().unwrap_or(DEFAULT_CONFIG);
     match fs::read_to_string(path) {
         Ok(text) => {
             let (parsed, warnings) = Config::parse(&text);
             for w in warnings {
-                eprintln!("iowatchd: aviso de configuracao ({path}): {w}");
+                eprintln!("iowatchd: configuration warning ({path}): {w}");
             }
             cfg = parsed;
         }
         Err(e) if cli.config.is_some() => {
-            return Err(format!("nao foi possivel ler {path}: {e}"));
+            return Err(format!("could not read {path}: {e}"));
         }
         Err(_) => {}
     }
@@ -615,19 +615,19 @@ fn build_config(cli: &Cli) -> Result<Config, String> {
 
     if cfg.device == "auto" {
         cfg.device = detect_device()
-            .ok_or("nao foi possivel detectar o disco; use --device ou defina 'device'")?;
+            .ok_or("could not detect the disk; use --device or set 'device' in the configuration")?;
     }
     if read_io_ticks(&cfg.device).is_none() {
-        return Err(format!("dispositivo '{}' nao encontrado em /proc/diskstats", cfg.device));
+        return Err(format!("device '{}' not found in /proc/diskstats", cfg.device));
     }
     Ok(cfg)
 }
 
 // ---------------------------------------------------------------------------
-// Sinais
+// Signals
 // ---------------------------------------------------------------------------
 
-/// Marcados pelo tratador de sinais e consultados no loop principal.
+/// Set by the signal handler and polled by the main loop.
 static STOP: AtomicBool = AtomicBool::new(false);
 static RELOAD: AtomicBool = AtomicBool::new(false);
 
@@ -636,7 +636,7 @@ extern "C" {
     fn sleep(seconds: u32) -> u32;
 }
 
-/// Tratador de sinais: so mexe em atomicos, o que e seguro em contexto de sinal.
+/// Signal handler: only touches atomics, which is safe in signal context.
 extern "C" fn on_signal(signum: i32) {
     if signum == 1 {
         RELOAD.store(true, Ordering::SeqCst); // SIGHUP
@@ -646,7 +646,7 @@ extern "C" fn on_signal(signum: i32) {
 }
 
 fn install_signal_handlers() {
-    // SAFETY: `on_signal` so usa operacoes atomicas, seguras em tratador de sinal.
+    // SAFETY: `on_signal` only uses atomic operations, which are signal-safe.
     unsafe {
         signal(1, on_signal); // SIGHUP
         signal(2, on_signal); // SIGINT
@@ -654,25 +654,26 @@ fn install_signal_handlers() {
     }
 }
 
-/// Dorme `secs` segundos, mas acorda na hora quando chega um sinal
-/// (`std::thread::sleep` voltaria a dormir), permitindo parar e recarregar sem demora.
+/// Sleeps for `secs` seconds, but wakes up immediately when a signal arrives
+/// (`std::thread::sleep` would go back to sleep), so stop and reload take
+/// effect without delay.
 fn nap(secs: u64) {
-    // SAFETY: chamada simples da libc, sem ponteiros.
+    // SAFETY: plain libc call, no pointers involved.
     unsafe { sleep(secs.min(u32::MAX as u64) as u32) };
 }
 
 // ---------------------------------------------------------------------------
-// Programa principal
+// Main program
 // ---------------------------------------------------------------------------
 
-/// Estado do monitor: IO normal ou em alerta.
+/// Monitor state: IO normal or in alert.
 enum State {
     Normal { consecutive_high: u32 },
     Alert { last_report: Instant },
 }
 
-/// Modo `--once`: mede por um intervalo, imprime e, se acima do limite,
-/// lista os processos. Nao escreve em arquivo de log.
+/// `--once` mode: measures for one interval, prints, and lists the processes
+/// if above the threshold. Does not write to the log file.
 fn run_once(cfg: &Config) {
     let logger = Logger { file: None, max_bytes: 0 };
     let start_ticks = read_io_ticks(&cfg.device).unwrap_or(0);
@@ -686,7 +687,7 @@ fn run_once(cfg: &Config) {
     if util >= cfg.threshold {
         report_top_processes(cfg, &logger, util);
     } else {
-        println!("IO={util:.0}% em {}", cfg.device);
+        println!("IO={util:.0}% on {}", cfg.device);
     }
 }
 
@@ -700,13 +701,13 @@ fn main() {
         Ok(Parsed::Version) => return println!("iowatchd {}", env!("CARGO_PKG_VERSION")),
         Ok(Parsed::Run(cli)) => cli,
         Err(e) => {
-            eprintln!("iowatchd: {e}\nTente 'iowatchd --help' para mais informacoes.");
+            eprintln!("iowatchd: {e}\nTry 'iowatchd --help' for more information.");
             std::process::exit(2);
         }
     };
 
     let mut cfg = build_config(&cli).unwrap_or_else(|e| {
-        eprintln!("iowatchd: erro: {e}");
+        eprintln!("iowatchd: error: {e}");
         std::process::exit(1);
     });
 
@@ -723,7 +724,7 @@ fn main() {
     let mut state = State::Normal { consecutive_high: 0 };
 
     logger.log(&format!(
-        "iniciado: device={} limite={}% intervalo={}s",
+        "started: device={} threshold={}% interval={}s",
         cfg.device, cfg.threshold, cfg.interval
     ));
 
@@ -731,7 +732,7 @@ fn main() {
         nap(cfg.interval);
 
         if STOP.load(Ordering::SeqCst) {
-            logger.log("encerrado");
+            logger.log("stopped");
             break;
         }
 
@@ -740,22 +741,22 @@ fn main() {
                 Ok(new) => {
                     cfg = new;
                     logger = make_logger(&cfg);
-                    // O disco pode ter mudado: reinicia as referencias e o estado.
+                    // The disk may have changed: reset the references and the state.
                     prev_ticks = read_io_ticks(&cfg.device).unwrap_or(0);
                     prev_time = Instant::now();
                     state = State::Normal { consecutive_high: 0 };
                     logger.log(&format!(
-                        "configuracao recarregada: device={} limite={}% intervalo={}s",
+                        "configuration reloaded: device={} threshold={}% interval={}s",
                         cfg.device, cfg.threshold, cfg.interval
                     ));
                 }
-                Err(e) => logger.log(&format!("falha ao recarregar ({e}); mantendo a configuracao atual")),
+                Err(e) => logger.log(&format!("reload failed ({e}); keeping the current configuration")),
             }
             continue;
         }
 
         let Some(ticks) = read_io_ticks(&cfg.device) else {
-            eprintln!("aviso: falha ao ler /proc/diskstats");
+            eprintln!("warning: failed to read /proc/diskstats");
             continue;
         };
         let now = Instant::now();
@@ -772,8 +773,8 @@ fn main() {
                     let count = consecutive_high + 1;
                     if count >= cfg.trigger_samples {
                         report_top_processes(&cfg, &logger, util);
-                        // A medicao de processos consumiu tempo; reinicia a
-                        // referencia para a proxima amostra do disco.
+                        // The process measurement took time; reset the
+                        // reference for the next disk sample.
                         prev_ticks = read_io_ticks(&cfg.device).unwrap_or(prev_ticks);
                         prev_time = Instant::now();
                         State::Alert { last_report: Instant::now() }
@@ -786,7 +787,7 @@ fn main() {
             }
             State::Alert { last_report } => {
                 if util < cfg.clear_threshold {
-                    logger.log(&format!("IO normalizado: {util:.0}% em {}", cfg.device));
+                    logger.log(&format!("IO back to normal: {util:.0}% on {}", cfg.device));
                     State::Normal { consecutive_high: 0 }
                 } else if util >= cfg.threshold
                     && last_report.elapsed() >= Duration::from_secs(cfg.cooldown)
@@ -808,7 +809,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn io_ticks_e_lido_do_dispositivo_certo() {
+    fn io_ticks_is_read_from_the_right_device() {
         let s = "   8       0 sda 100 0 800 50 200 0 1600 70 0 4242 120 0 0 0 0 0 0\n\
                  \x20  8       1 sda1 1 0 8 5 2 0 16 7 0 99 12 0 0 0 0 0 0\n";
         assert_eq!(parse_io_ticks(s, "sda"), Some(4242));
@@ -817,12 +818,12 @@ mod tests {
     }
 
     #[test]
-    fn cli_aceita_formas_longas_curtas_e_igual() {
+    fn cli_accepts_long_short_and_equals_forms() {
         let a = |v: &[&str]| Cli::parse(v.iter().map(|s| s.to_string()));
         assert_eq!(a(&["-h"]), Ok(Parsed::Help));
         assert_eq!(a(&["--version"]), Ok(Parsed::Version));
         let Ok(Parsed::Run(c)) = a(&["-d", "nvme0n1", "--threshold=60", "-i", "5", "--once"]) else {
-            panic!("falhou")
+            panic!("parse failed")
         };
         assert_eq!(c.device.as_deref(), Some("nvme0n1"));
         assert_eq!(c.threshold, Some(60.0));
@@ -831,10 +832,10 @@ mod tests {
     }
 
     #[test]
-    fn cli_rejeita_entradas_invalidas() {
+    fn cli_rejects_invalid_input() {
         let a = |v: &[&str]| Cli::parse(v.iter().map(|s| s.to_string()));
         assert!(a(&["--bogus"]).is_err());
-        assert!(a(&["arquivo"]).is_err());
+        assert!(a(&["file"]).is_err());
         assert!(a(&["-t"]).is_err());
         assert!(a(&["-t", "0"]).is_err());
         assert!(a(&["-t", "101"]).is_err());
@@ -843,7 +844,7 @@ mod tests {
     }
 
     #[test]
-    fn origem_da_raiz_e_extraida_do_mountinfo() {
+    fn root_source_is_extracted_from_mountinfo() {
         let m = "22 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw\n\
                  30 22 0:25 / /tmp rw - tmpfs tmpfs rw\n\
                  40 22 0:40 /@ / rw - btrfs /dev/mapper/cryptroot rw\n";
@@ -852,21 +853,21 @@ mod tests {
     }
 
     #[test]
-    fn utilizacao_e_limitada_a_100() {
+    fn utilization_is_capped_at_100() {
         assert_eq!(utilization(500, 1000), 50.0);
         assert_eq!(utilization(2000, 1000), 100.0);
         assert_eq!(utilization(10, 0), 0.0);
     }
 
     #[test]
-    fn proc_io_le_bytes_reais() {
+    fn proc_io_reads_real_bytes() {
         let t = "rchar: 10\nwchar: 20\nread_bytes: 4096\nwrite_bytes: 8192\n";
         assert_eq!(parse_proc_io(t), Some(ProcIo { read: 4096, write: 8192 }));
         assert_eq!(parse_proc_io("rchar: 1\n"), None);
     }
 
     #[test]
-    fn top_ordena_e_ignora_processos_sem_io() {
+    fn top_sorts_and_ignores_processes_without_io() {
         let before: HashMap<u32, ProcIo> = [(1, ProcIo { read: 0, write: 0 })].into();
         let after: HashMap<u32, ProcIo> = [
             (1, ProcIo { read: 0, write: 0 }),
@@ -880,7 +881,7 @@ mod tests {
     }
 
     #[test]
-    fn config_aplica_valores_e_avisa_sobre_erros() {
+    fn config_applies_values_and_warns_about_errors() {
         let (c, w) = Config::parse("device = nvme0n1\nthreshold=90 # x\ninterval = abc\nfoo = 1\nlog_file =\n");
         assert_eq!(c.device, "nvme0n1");
         assert_eq!(c.threshold, 90.0);
@@ -890,7 +891,7 @@ mod tests {
     }
 
     #[test]
-    fn config_corrige_histerese_invertida() {
+    fn config_fixes_inverted_hysteresis() {
         let (c, _) = Config::parse("threshold = 50\nclear_threshold = 70\ninterval = 0\n");
         assert_eq!(c.clear_threshold, 50.0);
         assert_eq!(c.interval, 1);

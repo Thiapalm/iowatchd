@@ -2,12 +2,13 @@
 name = "iowatchd"
 version = "0.1.0"
 edition = "2021"
-description = "Monitora o uso de IO do disco e registra quais processos o estao consumindo"
+description = "Monitors disk IO usage and logs which processes are consuming it"
+license = "MIT"
 
-# Sem dependencias externas: binario pequeno, compilacao offline e baixo consumo.
+# No external dependencies: small binary, offline builds and low resource usage.
 
 [profile.release]
-opt-level = "s"     # prioriza tamanho
+opt-level = "s"     # optimize for size
 lto = true
 codegen-units = 1
 panic = "abort"

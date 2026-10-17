@@ -1,4 +1,4 @@
 #!/bin/sh
-# Servico runit do iowatchd (nice 19, IO idle).
+# runit service for iowatchd (nice 19, idle IO class).
 exec 2>&1
 exec chpst -n 19 ionice -c 3 /usr/local/bin/iowatchd -c /etc/iowatchd.conf

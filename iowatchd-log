@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Mostra os alertas do iowatchd.
-#   iowatchd-log          ultimos alertas (padrao: 50 linhas)
-#   iowatchd-log -f       acompanha em tempo real
-#   iowatchd-log -s       status do servico
-#   iowatchd-log -h       ajuda
+# Shows the alerts logged by iowatchd.
+#   iowatchd-log          latest alerts (default: 50 lines)
+#   iowatchd-log -f       follow in real time
+#   iowatchd-log -s       service status
+#   iowatchd-log -h       help
 LOG=/var/log/iowatchd.log
 
 case "${1:-}" in
