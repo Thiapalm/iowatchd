@@ -124,10 +124,16 @@ extern "C" {
 /// Uses libc's `localtime_r` (already linked by std) to honor the system time
 /// zone without needing external libraries.
 fn timestamp() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    format_time(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0),
+    )
+}
+
+/// Formats a Unix time in the same local format as [`timestamp`].
+pub fn format_time(secs: i64) -> String {
     let mut tm = Tm {
         sec: 0,
         min: 0,

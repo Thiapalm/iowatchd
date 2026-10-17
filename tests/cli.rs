@@ -256,3 +256,53 @@ fn sigusr1_logs_status() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn report_summarizes_the_log() {
+    let dir = std::env::temp_dir().join(format!("iowatchd-report-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("io.log");
+    let conf = dir.join("t.conf");
+    // The 2000 entry is outside any period; the 2999 one is always inside.
+    std::fs::write(
+        &log,
+        "2000-01-01 10:00:00 ALERT IO=90% on sda | 1) old pid=1 user=x R=0KB/s W=1KB/s cmd=\"old\"\n\
+         2999-01-01 10:00:00 ALERT IO=95% on sda (await=2.0ms) | 1) brave pid=2 user=x unit=app-brave R=0KB/s W=2.0MB/s cmd=\"brave\"\n\
+         2999-01-01 10:00:05 IO back to normal: 5% on sda\n",
+    )
+    .unwrap();
+    std::fs::write(&conf, format!("log_file = {}\n", log.display())).unwrap();
+    let c = conf.to_str().unwrap();
+
+    let (code, out, _) = run(&["-c", c, "--report", "--since", "7d"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("alerts: 1"), "{out}");
+    assert!(out.contains("brave") && out.contains("app-brave"), "{out}");
+    assert!(!out.contains("old"), "{out}");
+
+    let (code, out, _) = run(&["-c", c, "-Rj"]);
+    assert_eq!(code, 0);
+    assert!(
+        out.contains("\"alerts\":1") && out.contains("\"name\":\"brave\""),
+        "{out}"
+    );
+
+    let (code, _, err) = run(&["-c", c, "--report", "--since", "soon"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("--since"), "{err}");
+
+    std::fs::write(&conf, "log_file = /nonexistent/io.log\n").unwrap();
+    let (code, _, err) = run(&["-c", c, "--report"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("could not read"), "{err}");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn once_shows_disk_details() {
+    let Some(dev) = any_device() else { return };
+    let (code, out, _) = run(&["-d", &dev, "-i", "1", "--once"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("queue="), "{out}");
+}

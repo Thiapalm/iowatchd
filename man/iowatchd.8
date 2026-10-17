@@ -1,4 +1,4 @@
-.TH IOWATCHD 8 "October 2026" "iowatchd 0.3.1" "System Administration"
+.TH IOWATCHD 8 "October 2026" "iowatchd 0.4.0" "System Administration"
 .SH NAME
 iowatchd \- monitor disk IO usage and log which processes consume it
 .SH SYNOPSIS
@@ -60,6 +60,17 @@ Also print every sample to standard output.
 List the disks that can be monitored (name, size, SSD/HDD, model) and mark the
 one chosen by \fBauto\fR. Exit.
 .TP
+\fB\-R\fR, \fB\-\-report\fR
+Read the log file (and the rotated \fI<file>.1\fR) and print a summary of the
+alerts: count, peak IO, alerts per hour of the day and the processes or
+services that appeared in the most alerts, with their average and peak IO
+rates. With \fB\-\-json\fR the summary is a single JSON object. Needs
+\fBlog_file\fR to be set. Exit.
+.TP
+\fB\-\-since\fR \fIPERIOD\fR
+Period covered by \fB\-\-report\fR: seconds, or a number followed by
+\fBs\fR, \fBm\fR, \fBh\fR, \fBd\fR or \fBw\fR. Default 24h.
+.TP
 \fB\-h\fR, \fB\-\-help\fR
 Show help and exit.
 .TP
@@ -69,6 +80,22 @@ Show the version, license and project URL, and exit.
 Short options can be grouped (\fB\-jq\fR) and take attached values
 (\fB\-t80\fR). \fB\-\-\fR ends the options; mistyped long options get a
 suggestion. Command-line options take precedence over the configuration file.
+.SH ALERTS
+An alert line has the form
+.PP
+.nf
+ALERT IO=97% on sda (await=45.2ms queue=3.1 read=0KB/s write=60KB/s psi=12.0%) | 1) name pid=N user=U unit=S R=.. W=.. cmd="..."
+.fi
+.PP
+\fBIO\fR is the utilization (time the disk was busy, as \fB%util\fR in
+\fBiostat\fR(1)). It is not throughput: a disk can be 100% busy with little
+data, so the details help to interpret it. \fBawait\fR is the average time per
+request including queueing; \fBqueue\fR is the average number of requests in
+flight; \fBread\fR and \fBwrite\fR are the disk throughput; \fBpsi\fR is the
+share of the last 10 seconds in which tasks stalled waiting for IO
+(\fI/proc/pressure/io\fR, shown only when the kernel provides it). Each process
+shows the systemd unit or container it belongs to (\fBunit\fR), taken from its
+cgroup.
 .SH CONFIGURATION
 See \fBiowatchd.conf\fR(5).
 .SH NOTIFICATIONS

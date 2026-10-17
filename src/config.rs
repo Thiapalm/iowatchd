@@ -31,6 +31,9 @@ pub struct Config {
     pub log_max_bytes: u64,
     /// Log format: plain text or one JSON object per line.
     pub log_json: bool,
+    /// Shell command run on every alert and recovery (`None` disables it).
+    /// It receives the details in `IOWATCHD_*` environment variables.
+    pub notify_command: Option<String>,
 }
 
 impl Default for Config {
@@ -47,6 +50,7 @@ impl Default for Config {
             log_file: Some(PathBuf::from("/var/log/iowatchd.log")),
             log_max_bytes: 5 * 1024 * 1024,
             log_json: false,
+            notify_command: None,
         }
     }
 }
@@ -89,6 +93,10 @@ impl Config {
                     } else {
                         Some(value.into())
                     };
+                    true
+                }
+                "notify_command" => {
+                    cfg.notify_command = (!value.is_empty()).then(|| value.to_string());
                     true
                 }
                 "log_max_mb" => value
@@ -147,6 +155,18 @@ mod tests {
         cfg.apply("threshold = 90\ntop_n = 3\n");
         cfg.apply("threshold = 60\n");
         assert_eq!((cfg.threshold, cfg.top_n), (60.0, 3));
+    }
+
+    #[test]
+    fn reads_notify_command() {
+        let (c, w) = parse("notify_command = /usr/local/bin/hook --flag\n");
+        assert_eq!(
+            c.notify_command.as_deref(),
+            Some("/usr/local/bin/hook --flag")
+        );
+        assert!(w.is_empty());
+        let (c, _) = parse("notify_command =\n");
+        assert!(c.notify_command.is_none());
     }
 
     #[test]

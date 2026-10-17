@@ -16,6 +16,8 @@
 //! * [`config`]  configuration values and file parser
 //! * [`disk`]    disk detection and utilization
 //! * [`procs`]   per-process IO and the alert report
+//! * [`hook`]    the `notify_command` notification hook
+//! * [`report`]  `--report`: summary of the alerts in the log
 //! * [`logger`]  stdout/file logging (text or JSON)
 //! * [`monitor`] the sampling loop and alert state machine
 //! * [`signals`] signal handlers and interruptible sleep
@@ -24,13 +26,15 @@
 mod cli;
 mod config;
 mod disk;
+mod hook;
 mod logger;
 mod monitor;
 mod notify;
 mod procs;
+mod report;
 mod signals;
 
-use cli::{build_config, check_config, version_text, Cli, Parsed, USAGE};
+use cli::{build_config, check_config, report_settings, version_text, Cli, Parsed, USAGE};
 
 fn main() {
     let cli = match Cli::parse(std::env::args().skip(1)) {
@@ -51,6 +55,19 @@ fn main() {
             println!("{line}");
         }
         return;
+    }
+
+    if cli.report {
+        let cfg = report_settings(&cli).unwrap_or_else(|e| {
+            eprintln!("iowatchd: error: {e}");
+            std::process::exit(1);
+        });
+        std::process::exit(report::run(
+            cfg.log_file.as_deref(),
+            cli.since.unwrap_or(report::DEFAULT_SINCE_SECS),
+            cfg.top_n,
+            cli.json,
+        ));
     }
 
     if cli.check_config {

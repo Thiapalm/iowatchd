@@ -4,7 +4,8 @@
 use std::fs;
 
 use crate::config::Config;
-use crate::disk::{detect_device, read_io_ticks};
+use crate::disk::{detect_device, read_stats};
+use crate::report::parse_duration;
 
 /// Configuration file read when `-c` is not given (if it exists).
 const DEFAULT_CONFIG: &str = "/etc/iowatchd.conf";
@@ -28,6 +29,8 @@ Options:
   -o, --once              take a single measurement, print it and exit
   -C, --check-config      validate the configuration, print it and exit
   -L, --list-devices      list the disks that can be monitored and exit
+  -R, --report            summarize the alerts in the log file and exit
+      --since PERIOD      period for --report: 90s, 30m, 24h, 7d (default: 24h)
   -f, --foreground        run in the foreground (the default; accepted for
                           compatibility with service managers)
   -q, --quiet             do not print to stdout (the log file still works)
@@ -46,7 +49,8 @@ Examples:
   iowatchd --once                 measure the root disk for one interval
   iowatchd -d nvme0n1 -t 60       monitor nvme0n1 with a 60% threshold
   iowatchd --check-config         validate /etc/iowatchd.conf
-  iowatchd --list-devices         show the available disks";
+  iowatchd --list-devices         show the available disks
+  iowatchd --report --since 7d    top IO offenders of the last week";
 
 /// Text printed by `--version`.
 pub fn version_text() -> String {
@@ -69,6 +73,9 @@ pub struct Cli {
     pub once: bool,
     pub check_config: bool,
     pub list_devices: bool,
+    pub report: bool,
+    /// Period of `--report` in seconds.
+    pub since: Option<u64>,
     pub quiet: bool,
     pub verbose: bool,
 }
@@ -89,6 +96,8 @@ const LONG_OPTIONS: &[&str] = &[
     "json",
     "check-config",
     "list-devices",
+    "report",
+    "since",
     "foreground",
     "quiet",
     "verbose",
@@ -108,6 +117,7 @@ fn long_for_short(c: char) -> Option<&'static str> {
         'j' => "json",
         'C' => "check-config",
         'L' => "list-devices",
+        'R' => "report",
         'f' => "foreground",
         'q' => "quiet",
         'v' => "verbose",
@@ -121,7 +131,10 @@ fn long_for_short(c: char) -> Option<&'static str> {
 }
 
 fn takes_value(long: &str) -> bool {
-    matches!(long, "config" | "device" | "threshold" | "interval" | "top")
+    matches!(
+        long,
+        "config" | "device" | "threshold" | "interval" | "top" | "since"
+    )
 }
 
 /// Edit distance between two short strings (for "did you mean" hints).
@@ -173,6 +186,8 @@ fn apply(
         ("json", _) => cli.json = true,
         ("check-config", _) => cli.check_config = true,
         ("list-devices", _) => cli.list_devices = true,
+        ("report", _) => cli.report = true,
+        ("since", Some(v)) => cli.since = Some(parse_duration(&v).ok_or_else(|| bad(&v))?),
         ("foreground", _) => {}
         ("quiet", _) => cli.quiet = true,
         ("verbose", _) => cli.verbose = true,
@@ -295,7 +310,8 @@ fn dropins(path: &str) -> Vec<String> {
 /// line, and resolves `device = auto`. Returns the configuration together
 /// with the warnings found while parsing the files. Also used when
 /// reloading (SIGHUP).
-fn load_config(cli: &Cli) -> Result<(Config, Vec<String>), String> {
+/// Reads the configuration file and its drop-ins on top of the defaults.
+fn load_files(cli: &Cli) -> Result<(Config, Vec<String>), String> {
     let mut cfg = Config::default();
     let mut warnings = Vec::new();
 
@@ -313,6 +329,23 @@ fn load_config(cli: &Cli) -> Result<(Config, Vec<String>), String> {
             Err(_) => {}
         }
     }
+    Ok((cfg, warnings))
+}
+
+/// `--report` needs only the files' settings (log file, top N), not a disk.
+pub fn report_settings(cli: &Cli) -> Result<Config, String> {
+    let (mut cfg, warnings) = load_files(cli)?;
+    for w in warnings {
+        eprintln!("iowatchd: configuration warning: {w}");
+    }
+    if let Some(n) = cli.top_n {
+        cfg.top_n = n;
+    }
+    Ok(cfg)
+}
+
+fn load_config(cli: &Cli) -> Result<(Config, Vec<String>), String> {
+    let (mut cfg, warnings) = load_files(cli)?;
 
     if let Some(d) = &cli.device {
         cfg.device = d.clone();
@@ -336,7 +369,7 @@ fn load_config(cli: &Cli) -> Result<(Config, Vec<String>), String> {
             "could not detect the disk; use --device or set 'device' in the configuration",
         )?;
     }
-    if read_io_ticks(&cfg.device).is_none() {
+    if read_stats(&cfg.device).is_none() {
         return Err(format!(
             "device '{}' not found in /proc/diskstats (see --list-devices)",
             cfg.device
@@ -376,6 +409,10 @@ pub fn check_config(cli: &Cli) -> i32 {
             }
             println!("log_max_mb={}", cfg.log_max_bytes / 1024 / 1024);
             println!("log_format={}", if cfg.log_json { "json" } else { "text" });
+            println!(
+                "notify_command={}",
+                cfg.notify_command.as_deref().unwrap_or("")
+            );
             if warnings.is_empty() {
                 println!("configuration OK");
                 0

@@ -9,10 +9,10 @@ _iowatchd() {
         -d|--device)
             COMPREPLY=($(compgen -W "auto $(awk '{print $3}' /proc/diskstats 2>/dev/null)" -- "$cur"))
             return ;;
-        -t|--threshold|-i|--interval|-n|--top) return ;;
+        -t|--threshold|-i|--interval|-n|--top|--since) return ;;
     esac
     COMPREPLY=($(compgen -W "-c --config -d --device -t --threshold -i --interval
-        -n --top -j --json -o --once -C --check-config -L --list-devices
+        -n --top -j --json -o --once -C --check-config -L --list-devices -R --report --since
         -f --foreground -q --quiet -v --verbose -h --help -V --version" -- "$cur"))
 }
 complete -F _iowatchd iowatchd

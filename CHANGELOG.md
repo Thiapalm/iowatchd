@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-10-17
+
+### Added
+- Alerts now show `await`, queue depth, disk throughput and IO pressure
+  (PSI, `/proc/pressure/io`), which explain why `%util` can be 100% with
+  little data moved. Also in JSON logs and `--once`/`--verbose` samples.
+- Each process in an alert shows its systemd unit / container (`unit=`),
+  from its cgroup.
+- `notify_command`: hook run on every alert and recovery, with
+  `IOWATCHD_EVENT`, `IOWATCHD_DEVICE`, `IOWATCHD_UTIL`, `IOWATCHD_MESSAGE`.
+- `--report` / `--since`: summary of the alerts in the log (counts, peak,
+  alerts per hour, top offenders), as text or JSON.
+
 ## [0.3.1] - 2026-10-17
 
 ### Fixed

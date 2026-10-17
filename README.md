@@ -30,11 +30,12 @@ If the old installation (`ssd-io-monitor`) exists, `install.sh` removes it. Man 
     iowatchd --once                 one measurement, then exit
     iowatchd --once --json          same, as a JSON line
     iowatchd --list-devices         list disks (marks the auto choice)
+    iowatchd --report --since 7d    who caused the most alerts (needs log_file)
     iowatchd --check-config         validate and print the configuration
     iowatchd -d nvme0n1 -t 60       override disk and threshold
     man iowatchd                    full manual
 
-Options (`-c -d -L -t -i -n -j -o -C -f -q -v -h -V`; short flags can be grouped, e.g. `-jq`) take precedence over the configuration file. Exit codes: 0 success, 1 runtime error, 2 usage error. `SIGHUP` reloads the configuration (`sudo systemctl reload iowatchd`); `SIGUSR1` logs the current status; `SIGTERM`/`SIGINT` stop it cleanly. The config path can come from `$IOWATCHD_CONFIG`, and `/etc/iowatchd.conf.d/*.conf` drop-ins override the main file. Under systemd the unit is `Type=notify`.
+Options (`-c -d -L -R -t -i -n -j -o -C -f -q -v -h -V`; short flags can be grouped, e.g. `-jq`) take precedence over the configuration file. Exit codes: 0 success, 1 runtime error, 2 usage error. `SIGHUP` reloads the configuration (`sudo systemctl reload iowatchd`); `SIGUSR1` logs the current status; `SIGTERM`/`SIGINT` stop it cleanly. The config path can come from `$IOWATCHD_CONFIG`, and `/etc/iowatchd.conf.d/*.conf` drop-ins override the main file. Under systemd the unit is `Type=notify`.
 
 Log shortcut: `iowatchd-log` (latest alerts), `iowatchd-log -f` (follow), `iowatchd-log -s` (status), `-n 50`, `--since '1 hour ago'`, `-j` (JSON). Prebuilt static binaries are attached to each GitHub release.
 
@@ -46,12 +47,22 @@ Equivalent commands:
 
 Example log entries:
 
-    ALERT IO=94% on sda | 1) dd pid=29847 user=thiago R=0KB/s W=177.4MB/s cmd="dd if=..." | 2) ...
+    ALERT IO=94% on sda (await=12.3ms queue=3.1 read=0KB/s write=177.4MB/s psi=8.0%) | 1) dd pid=29847 user=thiago unit=app-konsole-1521 R=0KB/s W=177.4MB/s cmd="dd if=..." | 2) ...
     IO back to normal: 0% on sda
 
 ## Configuration
 
 `/etc/iowatchd.conf` (template in `config.conf`, documented in `man iowatchd.conf`). After editing: `sudo systemctl reload iowatchd`. Set `log_format = json` for JSON lines, or `log_max_mb = 0` to let logrotate manage the file.
+
+The alert header explains the `%` figure: `await` (ms per request), `queue` (requests in flight), disk throughput and `psi` (share of the last 10 s in which tasks stalled waiting for IO, from `/proc/pressure/io`). Each process shows its systemd `unit` or container.
+
+### Notifications
+
+Set `notify_command` to run any command on every alert and recovery. It receives `IOWATCHD_EVENT` (`alert`/`normal`), `IOWATCHD_DEVICE`, `IOWATCHD_UTIL` and `IOWATCHD_MESSAGE`:
+
+    notify_command = logger -t iowatchd "$IOWATCHD_MESSAGE"
+
+Desktop pop-ups need the user's session bus, e.g. a script that runs `sudo -u USER DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus notify-send "$IOWATCHD_MESSAGE"`.
 
 ## Development
 

@@ -5,6 +5,7 @@ use std::fs;
 use std::time::Instant;
 
 use crate::config::Config;
+use crate::disk::{read_pressure, Metrics, Pressure};
 use crate::logger::{json_str, Logger};
 use crate::signals::nap;
 
@@ -145,13 +146,103 @@ fn load_users() -> HashMap<u32, String> {
 }
 
 /// Formats bytes/s in a human-readable way.
-fn human_rate(bytes_per_s: f64) -> String {
+pub fn human_rate(bytes_per_s: f64) -> String {
     const MB: f64 = 1024.0 * 1024.0;
     if bytes_per_s >= MB {
         format!("{:.1}MB/s", bytes_per_s / MB)
     } else {
         format!("{:.0}KB/s", bytes_per_s / 1024.0)
     }
+}
+
+/// Extracts the systemd unit / container scope from the contents of
+/// `/proc/<pid>/cgroup`, e.g. `app-brave@1234.service` or `docker-1a2b3c4d5e6f`.
+/// Returns an empty string when the process is in the root cgroup.
+fn parse_cgroup_unit(text: &str) -> String {
+    // cgroup v2 has a single `0::<path>` line; v1 lists several hierarchies.
+    let path = text
+        .lines()
+        .find_map(|l| l.strip_prefix("0::"))
+        .or_else(|| {
+            text.lines()
+                .find(|l| l.contains("name=systemd:"))
+                .and_then(|l| l.split_once("name=systemd:").map(|(_, p)| p))
+        })
+        .unwrap_or("");
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    // The outermost service/scope names the application (inner ones are
+    // often anonymous, like terminal tabs); `user@N.service` is only the
+    // per-user manager.
+    let unit = parts
+        .iter()
+        .find(|p| (p.ends_with(".service") || p.ends_with(".scope")) && !p.starts_with("user@"))
+        .or(parts.last());
+    unit.map(|u| shorten_unit(u)).unwrap_or_default()
+}
+
+/// Drops the `.service`/`.scope` suffix and abbreviates container IDs
+/// (hex strings of 32+ characters) to 12 characters.
+fn shorten_unit(unit: &str) -> String {
+    let base = unit
+        .strip_suffix(".service")
+        .or_else(|| unit.strip_suffix(".scope"))
+        .unwrap_or(unit);
+    base.split('-')
+        .map(|piece| {
+            if piece.len() >= 32 && piece.bytes().all(|b| b.is_ascii_hexdigit()) {
+                &piece[..12]
+            } else {
+                piece
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// The service or container a process belongs to.
+fn process_unit(pid: u32) -> String {
+    fs::read_to_string(format!("/proc/{pid}/cgroup"))
+        .map(|t| parse_cgroup_unit(&t))
+        .unwrap_or_default()
+}
+
+/// The disk-level details shown in the alert header, e.g.
+/// ` (await=12.3ms queue=1.5 read=0KB/s write=48KB/s psi=3.2%)`.
+fn metrics_text(m: &Metrics, psi: Option<Pressure>) -> String {
+    let mut parts = Vec::new();
+    if let Some(a) = m.await_ms {
+        parts.push(format!("await={a:.1}ms"));
+    }
+    parts.push(format!("queue={:.1}", m.queue_depth));
+    parts.push(format!("read={}", human_rate(m.read_bytes_per_s)));
+    parts.push(format!("write={}", human_rate(m.write_bytes_per_s)));
+    if let Some(p) = psi {
+        parts.push(format!("psi={:.1}%", p.some_avg10));
+    }
+    format!(" ({})", parts.join(" "))
+}
+
+/// The same details as JSON members (without braces).
+fn metrics_json(m: &Metrics, psi: Option<Pressure>) -> String {
+    let mut out = format!(
+        "\"queue_depth\":{:.2},\"disk_read_bytes_per_s\":{:.0},\"disk_write_bytes_per_s\":{:.0}",
+        m.queue_depth, m.read_bytes_per_s, m.write_bytes_per_s
+    );
+    if let Some(a) = m.await_ms {
+        out.push_str(&format!(",\"await_ms\":{a:.2}"));
+    }
+    if let Some(p) = psi {
+        out.push_str(&format!(
+            ",\"psi_some_avg10\":{:.2},\"psi_full_avg10\":{:.2}",
+            p.some_avg10, p.full_avg10
+        ));
+    }
+    out
+}
+
+/// One-line disk details for samples (`--once`, `--verbose`).
+pub fn sample_text(m: &Metrics) -> String {
+    metrics_text(m, read_pressure())
 }
 
 /// Per-process IO of other users is only readable by root (or with
@@ -168,8 +259,10 @@ pub fn unprivileged_warning() -> Option<&'static str> {
         .then_some("not running as root: only your own processes can be inspected")
 }
 
-/// Measures per-process IO over the configured window and writes the report to the log.
-pub fn report_top_processes(cfg: &Config, logger: &Logger, util: f64) {
+/// Measures per-process IO over the configured window and writes the report
+/// to the log. Returns the logged message (for the notification hook).
+pub fn report_top_processes(cfg: &Config, logger: &Logger, m: &Metrics) -> String {
+    let util = m.util;
     let window = cfg.process_window;
     let before = snapshot_processes();
     let start = Instant::now();
@@ -177,73 +270,107 @@ pub fn report_top_processes(cfg: &Config, logger: &Logger, util: f64) {
     let after = snapshot_processes();
     // Use the real elapsed time so the rates are accurate.
     let secs = start.elapsed().as_secs_f64().max(0.001);
+    let psi = read_pressure();
+    let head = format!(
+        "ALERT IO={util:.0}% on {}{}",
+        cfg.device,
+        metrics_text(m, psi)
+    );
+    let base_json = format!(
+        "\"device\":{},\"util\":{util:.0},{}",
+        json_str(&cfg.device),
+        metrics_json(m, psi)
+    );
 
     let top = top_processes(&before, &after, cfg.top_n);
-    let dev = json_str(&cfg.device);
     if top.is_empty() {
         let hint = if unprivileged_warning().is_some() {
             "run as root to see other users' processes"
         } else {
             "kernel/journal IO?"
         };
-        logger.emit(
-            "alert",
-            &format!(
-                "ALERT IO={util:.0}% on {} | no visible process did IO in the window ({hint})",
-                cfg.device
-            ),
-            &format!("\"device\":{dev},\"util\":{util:.0},\"processes\":[]"),
-        );
-        return;
+        let msg = format!("{head} | no visible process did IO in the window ({hint})");
+        logger.emit("alert", &msg, &format!("{base_json},\"processes\":[]"));
+        return msg;
     }
 
     let users = load_users();
     let mut list = Vec::new();
     let mut json_list = Vec::new();
     for (i, u) in top.iter().enumerate() {
-        let (name, user, cmd) = (
+        let (name, user, unit, cmd) = (
             process_name(u.pid),
             process_user(u.pid, &users),
+            process_unit(u.pid),
             process_cmdline(u.pid),
         );
         let (read, write) = (u.read as f64 / secs, u.write as f64 / secs);
+        let unit_text = if unit.is_empty() {
+            String::new()
+        } else {
+            format!(" unit={unit}")
+        };
         list.push(format!(
-            "{}) {} pid={} user={} R={} W={} cmd=\"{}\"",
+            "{}) {} pid={} user={}{} R={} W={} cmd=\"{}\"",
             i + 1,
             name,
             u.pid,
             user,
+            unit_text,
             human_rate(read),
             human_rate(write),
             cmd
         ));
         json_list.push(format!(
-            "{{\"pid\":{},\"name\":{},\"user\":{},\"read_bytes_per_s\":{:.0},\"write_bytes_per_s\":{:.0},\"cmd\":{}}}",
+            "{{\"pid\":{},\"name\":{},\"user\":{},\"unit\":{},\"read_bytes_per_s\":{:.0},\"write_bytes_per_s\":{:.0},\"cmd\":{}}}",
             u.pid,
             json_str(&name),
             json_str(&user),
+            json_str(&unit),
             read,
             write,
             json_str(&cmd)
         ));
     }
+    let msg = format!("{head} | {}", list.join(" | "));
     logger.emit(
         "alert",
-        &format!(
-            "ALERT IO={util:.0}% on {} | {}",
-            cfg.device,
-            list.join(" | ")
-        ),
-        &format!(
-            "\"device\":{dev},\"util\":{util:.0},\"processes\":[{}]",
-            json_list.join(",")
-        ),
+        &msg,
+        &format!("{base_json},\"processes\":[{}]", json_list.join(",")),
     );
+    msg
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cgroup_unit_is_extracted() {
+        assert_eq!(
+            parse_cgroup_unit(
+                "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-brave@1.service\n"
+            ),
+            "app-brave@1"
+        );
+        assert_eq!(
+            parse_cgroup_unit("0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-org.kde.konsole-1521.scope/tab(1529).scope\n"),
+            "app-org.kde.konsole-1521"
+        );
+        assert_eq!(
+            parse_cgroup_unit(&format!(
+                "0::/system.slice/docker-{}.scope\n",
+                "a1b2c3d4e5f6".repeat(5)
+            )),
+            "docker-a1b2c3d4e5f6"
+        );
+        assert_eq!(parse_cgroup_unit("0::/\n"), "");
+        assert_eq!(
+            parse_cgroup_unit("12:cpu:/x\n1:name=systemd:/system.slice/cron.service\n"),
+            "cron"
+        );
+        assert_eq!(parse_cgroup_unit(""), "");
+    }
 
     #[test]
     fn proc_io_reads_real_bytes() {

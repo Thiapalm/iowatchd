@@ -1,4 +1,4 @@
-.TH IOWATCHD.CONF 5 "October 2026" "iowatchd 0.3.1" "File Formats"
+.TH IOWATCHD.CONF 5 "October 2026" "iowatchd 0.4.0" "File Formats"
 .SH NAME
 iowatchd.conf \- configuration file for iowatchd
 .SH DESCRIPTION
@@ -48,11 +48,20 @@ rotation (use \fBlogrotate\fR(8)). Default 5.
 .TP
 .B log_format
 \fBtext\fR (default) or \fBjson\fR.
+.TP
+.B notify_command
+Shell command run (with \fBsh \-c\fR, in the background, killed after 30 s)
+every time an alert is logged and when IO returns to normal. It receives
+\fBIOWATCHD_EVENT\fR (\fBalert\fR or \fBnormal\fR), \fBIOWATCHD_DEVICE\fR,
+\fBIOWATCHD_UTIL\fR and \fBIOWATCHD_MESSAGE\fR (the logged text) in its
+environment. The value cannot contain \fB#\fR. Empty (default) disables it.
+The command runs as the daemon's user (root under systemd).
 .SH EXAMPLE
 .nf
 device = auto
 threshold = 90
 log_format = json
+notify_command = logger -t iowatchd "$IOWATCHD_MESSAGE"
 .fi
 .SH SEE ALSO
 .BR iowatchd (8),
