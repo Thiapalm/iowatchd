@@ -181,10 +181,15 @@ pub fn report_top_processes(cfg: &Config, logger: &Logger, util: f64) {
     let top = top_processes(&before, &after, cfg.top_n);
     let dev = json_str(&cfg.device);
     if top.is_empty() {
+        let hint = if unprivileged_warning().is_some() {
+            "run as root to see other users' processes"
+        } else {
+            "kernel/journal IO?"
+        };
         logger.emit(
             "alert",
             &format!(
-                "ALERT IO={util:.0}% on {} | no visible process did IO in the window (kernel/journal IO?)",
+                "ALERT IO={util:.0}% on {} | no visible process did IO in the window ({hint})",
                 cfg.device
             ),
             &format!("\"device\":{dev},\"util\":{util:.0},\"processes\":[]"),

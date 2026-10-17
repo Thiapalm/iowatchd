@@ -4,7 +4,11 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Set once a log-file write failure has been reported, to avoid repeating it.
+static FILE_WARNED: AtomicBool = AtomicBool::new(false);
 
 pub struct Logger {
     pub file: Option<PathBuf>,
@@ -84,7 +88,14 @@ impl Logger {
             Ok(mut f) => {
                 let _ = writeln!(f, "{file_line}");
             }
-            Err(e) => eprintln!("warning: could not write to {}: {e}", path.display()),
+            Err(e) => {
+                if !FILE_WARNED.swap(true, Ordering::Relaxed) {
+                    eprintln!(
+                        "warning: could not write to {}: {e} (further file errors are not repeated)",
+                        path.display()
+                    );
+                }
+            }
         }
     }
 }

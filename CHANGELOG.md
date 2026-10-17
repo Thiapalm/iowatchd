@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- A failing log file is reported once instead of on every event.
+- The "no visible process" alert now hints at running as root when
+  unprivileged.
+
 ## [0.3.0] - 2026-10-17
 
 ### Added
