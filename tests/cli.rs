@@ -6,6 +6,23 @@ use std::time::{Duration, Instant};
 
 const BIN: &str = env!("CARGO_BIN_EXE_iowatchd");
 
+extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
+/// Sends a signal by name through libc (the `kill` binary is not always installed).
+fn send_signal(pid: u32, name: &str) {
+    let sig = match name {
+        "HUP" => 1,
+        "INT" => 2,
+        "TERM" => 15,
+        "USR1" => 10,
+        other => panic!("unsupported signal {other}"),
+    };
+    // SAFETY: plain syscall wrapper with integer arguments.
+    assert_eq!(unsafe { kill(pid as i32, sig) }, 0);
+}
+
 /// First real-looking block device in /proc/diskstats, if any
 /// (CI containers may not have one, in which case dependent tests are skipped).
 fn any_device() -> Option<String> {
@@ -111,11 +128,7 @@ fn run_daemon_and_signal(dev: &str, signal: &str, wait_for: &str) -> (Option<i32
         .expect("spawn");
     // -q hides stdout, so give the daemon a moment to install its handlers.
     std::thread::sleep(Duration::from_millis(500));
-    let status = Command::new("kill")
-        .args([&format!("-{signal}"), &child.id().to_string()])
-        .status()
-        .expect("kill");
-    assert!(status.success());
+    send_signal(child.id(), signal);
 
     let start = Instant::now();
     let code = loop {
@@ -228,11 +241,7 @@ fn sigusr1_logs_status() {
         .unwrap();
     std::thread::sleep(Duration::from_millis(500));
     for sig in ["USR1", "TERM"] {
-        assert!(Command::new("kill")
-            .args([&format!("-{sig}"), &child.id().to_string()])
-            .status()
-            .unwrap()
-            .success());
+        send_signal(child.id(), sig);
         std::thread::sleep(Duration::from_millis(300));
     }
     let mut out = String::new();
