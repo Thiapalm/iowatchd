@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-10-17
+
+### Added
+- Argument parser: grouped short flags (`-jq`), attached values (`-t80`),
+  `--` to end options and "did you mean" hints for mistyped long options.
+- `--list-devices` lists the monitorable disks and marks the `auto` choice.
+- `$IOWATCHD_CONFIG` and `<config>.d/*.conf` drop-in overrides.
+- `SIGUSR1` logs the current status (a `status` event).
+- Warning when running without privileges to inspect all processes.
+- `--version` shows license and project URL.
+- `iowatchd-log`: `-n/--lines`, `--since`, `--json`, `--no-pager`, and it now
+  follows `log_file` from the configuration (journal fallback when empty).
+- Release workflow: static musl binaries (x86_64, aarch64) with checksums
+  attached to GitHub releases; optional crates.io publishing.
+- CI builds the Debian and RPM packages.
+
+### Fixed
+- `iowatchd --once | head` no longer panics: SIGPIPE has its default action.
+
 ## [0.2.0] - 2026-10-17
 
 ### Added

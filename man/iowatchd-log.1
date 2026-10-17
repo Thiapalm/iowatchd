@@ -1,23 +1,48 @@
-.TH IOWATCHD-LOG 1 "October 2026" "iowatchd 0.2.0" "User Commands"
+.TH IOWATCHD-LOG 1 "October 2026" "iowatchd 0.3.0" "User Commands"
 .SH NAME
 iowatchd-log \- show the alerts logged by iowatchd
 .SH SYNOPSIS
 .B iowatchd-log
-[\fIN\fR | \fB\-f\fR | \fB\-s\fR | \fB\-h\fR]
+[\fIOPTIONS\fR] [\fIN\fR]
 .SH DESCRIPTION
-Shortcut to read \fI/var/log/iowatchd.log\fR and the service state.
+Shortcut to read the iowatchd log and the service state. The log file is the
+\fBlog_file\fR of \fI/etc/iowatchd.conf\fR (or of \fB$IOWATCHD_CONFIG\fR),
+\fI/var/log/iowatchd.log\fR by default. If file logging is disabled, the
+systemd journal is read instead.
 .SH OPTIONS
 .TP
-.I N
-Show the last \fIN\fR lines (default 50).
+\fB\-n\fR, \fB\-\-lines\fR \fIN\fR
+Show the last \fIN\fR lines (default 50). A bare \fIN\fR works too.
 .TP
-.B \-f
+\fB\-f\fR, \fB\-\-follow\fR
 Follow the log in real time.
 .TP
-.B \-s
+\fB\-\-since\fR \fIWHEN\fR
+Only show entries since \fIWHEN\fR, in any format understood by
+\fBdate\fR(1) \fB\-d\fR, e.g. "2026-10-17 08:00" or "1 hour ago".
+Cannot be combined with \fB\-\-follow\fR.
+.TP
+\fB\-j\fR, \fB\-\-json\fR
+Only show JSON entries (see \fBlog_format\fR); pretty-printed if \fBjq\fR(1)
+is installed.
+.TP
+\fB\-s\fR, \fB\-\-status\fR
 Show the service status (systemd, OpenRC or runit).
 .TP
-.B \-h
+\fB\-\-no\-pager\fR
+Do not page the \fB\-\-status\fR output.
+.TP
+\fB\-h\fR, \fB\-\-help\fR
 Show help.
+.SH ENVIRONMENT
+.TP
+.B IOWATCHD_LOG
+Log file to read, overriding the configuration.
+.TP
+.B IOWATCHD_CONFIG
+Configuration file to take \fBlog_file\fR from.
+.SH EXIT STATUS
+0 on success, 1 if the log cannot be read, 2 on usage errors.
 .SH SEE ALSO
-.BR iowatchd (8)
+.BR iowatchd (8),
+.BR iowatchd.conf (5)

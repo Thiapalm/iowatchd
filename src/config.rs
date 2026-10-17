@@ -52,10 +52,11 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Applies the contents of a configuration file on top of the defaults.
-    /// Invalid lines are ignored and returned as warnings.
-    pub fn parse(text: &str) -> (Config, Vec<String>) {
-        let mut cfg = Config::default();
+    /// Applies the contents of a configuration file on top of the current
+    /// values (so several files can be layered). Invalid lines are ignored and
+    /// returned as warnings. Call [`Config::normalize`] when all is applied.
+    pub fn apply(&mut self, text: &str) -> Vec<String> {
+        let cfg = self;
         let mut warnings = Vec::new();
 
         for (n, raw) in text.lines().enumerate() {
@@ -115,8 +116,7 @@ impl Config {
             }
         }
 
-        cfg.normalize();
-        (cfg, warnings)
+        warnings
     }
 
     /// Enforces safe values (avoids a loop without sleeping or inverted hysteresis).
@@ -134,21 +134,35 @@ impl Config {
 mod tests {
     use super::*;
 
+    fn parse(text: &str) -> (Config, Vec<String>) {
+        let mut cfg = Config::default();
+        let warnings = cfg.apply(text);
+        cfg.normalize();
+        (cfg, warnings)
+    }
+
+    #[test]
+    fn later_files_override_earlier_ones() {
+        let mut cfg = Config::default();
+        cfg.apply("threshold = 90\ntop_n = 3\n");
+        cfg.apply("threshold = 60\n");
+        assert_eq!((cfg.threshold, cfg.top_n), (60.0, 3));
+    }
+
     #[test]
     fn reads_log_format() {
-        let (c, w) = Config::parse("log_format = json\nlog_max_mb = 0\n");
+        let (c, w) = parse("log_format = json\nlog_max_mb = 0\n");
         assert!(c.log_json && w.is_empty());
         assert_eq!(c.log_max_bytes, 0);
-        let (c, w) = Config::parse("log_format = xml\n");
+        let (c, w) = parse("log_format = xml\n");
         assert!(!c.log_json);
         assert_eq!(w.len(), 1);
     }
 
     #[test]
     fn applies_values_and_warns_about_errors() {
-        let (c, w) = Config::parse(
-            "device = nvme0n1\nthreshold=90 # x\ninterval = abc\nfoo = 1\nlog_file =\n",
-        );
+        let (c, w) =
+            parse("device = nvme0n1\nthreshold=90 # x\ninterval = abc\nfoo = 1\nlog_file =\n");
         assert_eq!(c.device, "nvme0n1");
         assert_eq!(c.threshold, 90.0);
         assert_eq!(c.interval, 2);
@@ -158,7 +172,7 @@ mod tests {
 
     #[test]
     fn fixes_inverted_hysteresis() {
-        let (c, _) = Config::parse("threshold = 50\nclear_threshold = 70\ninterval = 0\n");
+        let (c, _) = parse("threshold = 50\nclear_threshold = 70\ninterval = 0\n");
         assert_eq!(c.clear_threshold, 50.0);
         assert_eq!(c.interval, 1);
     }

@@ -154,6 +154,20 @@ fn human_rate(bytes_per_s: f64) -> String {
     }
 }
 
+/// Per-process IO of other users is only readable by root (or with
+/// CAP_SYS_PTRACE). Returns a warning when that is not the case.
+pub fn unprivileged_warning() -> Option<&'static str> {
+    extern "C" {
+        fn geteuid() -> u32;
+    }
+    // SAFETY: plain libc call, no arguments.
+    let root = unsafe { geteuid() } == 0;
+    // Ambient capabilities (the systemd unit) also work: probe PID 1.
+    let can_read_pid1 = fs::read_to_string("/proc/1/io").is_ok();
+    (!root && !can_read_pid1)
+        .then_some("not running as root: only your own processes can be inspected")
+}
+
 /// Measures per-process IO over the configured window and writes the report to the log.
 pub fn report_top_processes(cfg: &Config, logger: &Logger, util: f64) {
     let window = cfg.process_window;

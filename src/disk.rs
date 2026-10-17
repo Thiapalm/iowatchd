@@ -66,6 +66,48 @@ pub fn detect_device() -> Option<String> {
     disks.into_iter().next()
 }
 
+/// Reads a small sysfs attribute, trimmed.
+fn sysfs(path: &str) -> Option<String> {
+    fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+}
+
+/// One line per physical disk for `--list-devices`: name, size, type, model
+/// and a marker for the disk that holds `/` (the `auto` choice).
+pub fn list_devices() -> Vec<String> {
+    let auto = detect_device();
+    let mut names: Vec<String> = fs::read_dir("/sys/block")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().join("device").exists())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+        .iter()
+        .map(|n| {
+            let sectors: u64 = sysfs(&format!("/sys/block/{n}/size"))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            let kind = match sysfs(&format!("/sys/block/{n}/queue/rotational")).as_deref() {
+                Some("1") => "HDD",
+                Some("0") => "SSD",
+                _ => "?",
+            };
+            let model = sysfs(&format!("/sys/block/{n}/device/model")).unwrap_or_default();
+            let mark = if auto.as_deref() == Some(n) {
+                "  (auto)"
+            } else {
+                ""
+            };
+            format!(
+                "{n:<12} {:>8.1} GiB  {kind}  {model}{mark}",
+                sectors as f64 * 512.0 / (1u64 << 30) as f64
+            )
+        })
+        .collect()
+}
+
 /// Extracts the `io_ticks` field (ms during which the disk had IO in flight)
 /// of the given device from `/proc/diskstats`.
 ///

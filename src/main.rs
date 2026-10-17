@@ -30,18 +30,28 @@ mod notify;
 mod procs;
 mod signals;
 
-use cli::{build_config, check_config, Cli, Parsed, USAGE};
+use cli::{build_config, check_config, version_text, Cli, Parsed, USAGE};
 
 fn main() {
     let cli = match Cli::parse(std::env::args().skip(1)) {
         Ok(Parsed::Help) => return println!("{USAGE}"),
-        Ok(Parsed::Version) => return println!("iowatchd {}", env!("CARGO_PKG_VERSION")),
+        Ok(Parsed::Version) => return println!("{}", version_text()),
         Ok(Parsed::Run(cli)) => cli,
         Err(e) => {
             eprintln!("iowatchd: {e}\nTry 'iowatchd --help' for more information.");
             std::process::exit(2);
         }
     };
+
+    // Restore the default SIGPIPE behavior before printing anything.
+    signals::install_signal_handlers();
+
+    if cli.list_devices {
+        for line in disk::list_devices() {
+            println!("{line}");
+        }
+        return;
+    }
 
     if cli.check_config {
         std::process::exit(check_config(&cli));
@@ -51,8 +61,6 @@ fn main() {
         eprintln!("iowatchd: error: {e}");
         std::process::exit(1);
     });
-
-    signals::install_signal_handlers();
 
     if cli.once {
         monitor::run_once(&cfg, &cli);

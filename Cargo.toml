@@ -1,9 +1,16 @@
 [package]
 name = "iowatchd"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Monitors disk IO usage and logs which processes are consuming it"
 license = "MIT"
+repository = "https://github.com/Thiapalm/iowatchd"
+homepage = "https://github.com/Thiapalm/iowatchd"
+readme = "README.md"
+keywords = ["io", "disk", "monitoring", "linux", "daemon"]
+categories = ["command-line-utilities", "os::linux-apis"]
+rust-version = "1.75"
+exclude = [".github/", "packaging/", "init/"]
 
 # No external dependencies: small binary, offline builds and low resource usage.
 

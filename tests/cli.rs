@@ -146,3 +146,104 @@ fn sigterm_and_sigint_stop_cleanly() {
         assert_eq!(code, Some(0), "SIG{sig}");
     }
 }
+
+#[test]
+fn version_mentions_license_and_repository() {
+    let (code, out, _) = run(&["--version"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("MIT") && out.contains("github.com/Thiapalm/iowatchd"));
+}
+
+#[test]
+fn grouped_flags_and_attached_values_work() {
+    let Some(dev) = any_device() else { return };
+    let (code, out, _) = run(&[&format!("-jod{dev}"), "-i1", "-t100"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("\"event\""), "{out}");
+    let (code, _, err) = run(&["--thresold=5"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("did you mean '--threshold'"), "{err}");
+}
+
+#[test]
+fn list_devices_succeeds() {
+    let (code, _, _) = run(&["--list-devices"]);
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn env_config_and_dropins_are_layered() {
+    let Some(dev) = any_device() else { return };
+    let dir = std::env::temp_dir().join(format!("iowatchd-env-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("main.conf.d")).unwrap();
+    std::fs::write(
+        dir.join("main.conf"),
+        format!("device = {dev}\nthreshold = 90\ntop_n = 3\n"),
+    )
+    .unwrap();
+    std::fs::write(dir.join("main.conf.d/10-local.conf"), "threshold = 55\n").unwrap();
+
+    let out = Command::new(BIN)
+        .arg("--check-config")
+        .env("IOWATCHD_CONFIG", dir.join("main.conf"))
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("threshold=55") && text.contains("top_n=3"),
+        "{text}"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn closed_pipe_kills_quietly_with_sigpipe() {
+    use std::os::unix::process::ExitStatusExt;
+    let Some(dev) = any_device() else { return };
+    let mut child = Command::new(BIN)
+        .args(["-d", &dev, "--once", "-i", "1", "-t", "100"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let status = child.wait().unwrap();
+    assert_eq!(status.signal(), Some(13), "{status:?}");
+}
+
+#[test]
+fn sigusr1_logs_status() {
+    let Some(dev) = any_device() else { return };
+    let dir = std::env::temp_dir().join(format!("iowatchd-usr1-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let conf = dir.join("t.conf");
+    std::fs::write(&conf, format!("device = {dev}\nlog_file =\ninterval = 1\n")).unwrap();
+
+    let mut child = Command::new(BIN)
+        .args(["-c", conf.to_str().unwrap()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    for sig in ["USR1", "TERM"] {
+        assert!(Command::new("kill")
+            .args([&format!("-{sig}"), &child.id().to_string()])
+            .status()
+            .unwrap()
+            .success());
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    let mut out = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut out)
+        .unwrap();
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+    assert!(out.contains("status: device="), "{out}");
+
+    let _ = std::fs::remove_dir_all(dir);
+}

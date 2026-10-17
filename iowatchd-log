@@ -1,16 +1,109 @@
 #!/usr/bin/env bash
-# Shows the alerts logged by iowatchd.
-#   iowatchd-log          latest alerts (default: 50 lines)
-#   iowatchd-log -f       follow in real time
-#   iowatchd-log -s       service status
-#   iowatchd-log -h       help
-LOG=/var/log/iowatchd.log
+# iowatchd-log - show the alerts logged by iowatchd.
+set -u
 
-case "${1:-}" in
-  -f) exec tail -n 20 -F "$LOG" ;;
-  -s) if [ -d /run/systemd/system ]; then exec systemctl status iowatchd --no-pager
-      elif command -v rc-service >/dev/null 2>&1; then exec rc-service iowatchd status
-      else exec sv status iowatchd; fi ;;
-  -h|--help) sed -n '2,6p' "$0" ;;
-  *)  tail -n "${1:-50}" "$LOG" ;;
-esac
+usage() {
+  cat <<'EOF'
+Usage: iowatchd-log [OPTIONS] [N]
+
+Show the alerts logged by iowatchd.
+
+Options:
+  -n, --lines N      show the last N lines (default: 50; a bare N also works)
+  -f, --follow       follow the log in real time
+      --since WHEN   only entries since WHEN, e.g. "2026-10-17 08:00",
+                     "1 hour ago", "yesterday" (GNU date syntax)
+  -j, --json         only JSON entries (pretty-printed when jq is installed)
+  -s, --status       show the service status
+      --no-pager     do not page the --status output
+  -h, --help         show this help
+
+The log file is taken from log_file in /etc/iowatchd.conf (or the file named
+by $IOWATCHD_CONFIG). Set $IOWATCHD_LOG to override it. When file logging is
+disabled the systemd journal is used instead.
+EOF
+}
+
+die() { echo "iowatchd-log: $*" >&2; echo "Try 'iowatchd-log --help' for more information." >&2; exit 2; }
+
+lines="" follow=0 status=0 since="" json=0 nopager=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    -n|--lines)  [ $# -ge 2 ] || die "option '$1' requires a value"; lines=$2; shift ;;
+    --lines=*)   lines=${1#*=} ;;
+    -f|--follow) follow=1 ;;
+    --since)     [ $# -ge 2 ] || die "option '$1' requires a value"; since=$2; shift ;;
+    --since=*)   since=${1#*=} ;;
+    -j|--json)   json=1 ;;
+    -s|--status) status=1 ;;
+    --no-pager)  nopager=1 ;;
+    -h|--help)   usage; exit 0 ;;
+    -n[0-9]*)    lines=${1#-n} ;;
+    -[0-9]*|[0-9]*) lines=${1#-} ;;
+    *)           die "unknown option or argument '$1'" ;;
+  esac
+  shift
+done
+
+case $lines in ''|*[!0-9]*) [ -z "$lines" ] || die "invalid number of lines: '$lines'" ;; esac
+
+if [ "$status" = 1 ]; then
+  if [ -d /run/systemd/system ]; then
+    if [ "$nopager" = 1 ]; then exec systemctl status iowatchd --no-pager; fi
+    exec systemctl status iowatchd
+  elif command -v rc-service >/dev/null 2>&1; then exec rc-service iowatchd status
+  else exec sv status iowatchd; fi
+fi
+
+# Value of log_file in the configuration; fails if the key is not set.
+conf_log_file() {
+  local conf=${IOWATCHD_CONFIG:-/etc/iowatchd.conf}
+  [ -r "$conf" ] || return 1
+  awk '{
+    sub(/#.*/, "")
+    if ($0 ~ /^[ \t]*log_file[ \t]*=/) {
+      v = $0; sub(/^[^=]*=/, "", v); gsub(/^[ \t]+|[ \t]+$/, "", v)
+      val = v; found = 1
+    }
+  } END { if (found) print val; else exit 1 }' "$conf"
+}
+
+LOG=${IOWATCHD_LOG:-}
+if [ -z "$LOG" ]; then
+  if LOG=$(conf_log_file); then :; else LOG=/var/log/iowatchd.log; fi
+fi
+
+# Keep only JSON lines, pretty-printed when jq is available.
+json_filter() {
+  if command -v jq >/dev/null 2>&1; then jq -R 'fromjson? // empty'
+  else grep --line-buffered '^{'; fi
+}
+maybe_json() { if [ "$json" = 1 ]; then json_filter; else cat; fi; }
+
+# Journal fallback when file logging is disabled (log_file empty).
+if [ -z "$LOG" ]; then
+  args=(-u iowatchd --no-pager -o cat)
+  [ -n "$lines" ] && args+=(-n "$lines")
+  [ -z "$lines" ] && [ -z "$since" ] && args+=(-n 50)
+  [ -n "$since" ] && args+=(--since "$since")
+  [ "$follow" = 1 ] && args+=(-f)
+  journalctl "${args[@]}" | maybe_json
+  exit "${PIPESTATUS[0]}"
+fi
+
+[ -r "$LOG" ] || { echo "iowatchd-log: cannot read $LOG (no alerts logged yet?)" >&2; exit 1; }
+
+if [ -n "$since" ]; then
+  [ "$follow" = 0 ] || die "--since cannot be combined with --follow"
+  from=$(date -d "$since" '+%Y-%m-%d %H:%M:%S' 2>/dev/null) || die "invalid date: '$since'"
+  # Lines carry a "YYYY-MM-DD HH:MM:SS" timestamp (text and JSON formats).
+  awk -v s="$from" '
+    match($0, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]/) {
+      p = (substr($0, RSTART, 19) >= s)
+    }
+    p' "$LOG" | { if [ -n "$lines" ]; then tail -n "$lines"; else cat; fi; } | maybe_json
+elif [ "$follow" = 1 ]; then
+  tail -n "${lines:-20}" -F "$LOG" | maybe_json
+else
+  tail -n "${lines:-50}" "$LOG" | maybe_json
+fi

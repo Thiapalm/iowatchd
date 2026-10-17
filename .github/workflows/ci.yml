@@ -32,3 +32,37 @@ jobs:
           sudo apt-get install -y zsh shellcheck >/dev/null
           zsh -n completions/_iowatchd
           shellcheck -S warning iowatchd-log
+
+  package-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo package --locked
+
+  deb:
+    runs-on: ubuntu-latest
+    container: debian:stable
+    steps:
+      - run: apt-get update && apt-get install -y build-essential debhelper cargo git
+      - uses: actions/checkout@v4
+      - name: Build the .deb
+        run: |
+          cp -r packaging/debian debian
+          dpkg-buildpackage -b -us -uc
+          dpkg-deb -c ../iowatchd_*.deb
+
+  rpm:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - run: dnf install -y rpm-build cargo make systemd-rpm-macros git tar gzip
+      - uses: actions/checkout@v4
+      - name: Build the .rpm
+        run: |
+          git config --global --add safe.directory "$PWD"
+          ver=$(awk '/^Version:/ {print $2}' packaging/rpm/iowatchd.spec)
+          mkdir -p ~/rpmbuild/SOURCES
+          git archive --prefix="iowatchd-$ver/" -o ~/rpmbuild/SOURCES/iowatchd-$ver.tar.gz HEAD
+          rpmbuild -ba packaging/rpm/iowatchd.spec
+          rpm -qlp ~/rpmbuild/RPMS/*/iowatchd-*.rpm

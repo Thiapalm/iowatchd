@@ -11,6 +11,7 @@ case $service in
       '(-j --json)'{-j,--json}'[log one JSON object per line]' \
       '(-o --once)'{-o,--once}'[take a single measurement and exit]' \
       '(-C --check-config)'{-C,--check-config}'[validate the configuration and exit]' \
+      '(-L --list-devices)'{-L,--list-devices}'[list monitorable disks and exit]' \
       '(-f --foreground)'{-f,--foreground}'[run in the foreground]' \
       '(-q --quiet)'{-q,--quiet}'[do not print to stdout]' \
       '(-v --verbose)'{-v,--verbose}'[print every sample]' \
@@ -19,8 +20,12 @@ case $service in
     ;;
   iowatchd-log)
     _arguments \
-      '-f[follow in real time]' \
-      '-s[show service status]' \
+      '(-n --lines)'{-n,--lines}'[show the last N lines]:lines:' \
+      '(-f --follow)'{-f,--follow}'[follow in real time]' \
+      '--since[only entries since WHEN]:when:' \
+      '(-j --json)'{-j,--json}'[only JSON entries]' \
+      '(-s --status)'{-s,--status}'[show service status]' \
+      '--no-pager[do not page the status output]' \
       '(- *)'{-h,--help}'[show help]' \
       '1:lines:'
     ;;

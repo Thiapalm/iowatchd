@@ -9,8 +9,8 @@ use crate::config::Config;
 use crate::disk::{read_io_ticks, utilization};
 use crate::logger::{json_str, Logger};
 use crate::notify::sd_notify;
-use crate::procs::report_top_processes;
-use crate::signals::{nap, RELOAD, STOP};
+use crate::procs::{report_top_processes, unprivileged_warning};
+use crate::signals::{nap, RELOAD, STATUS, STOP};
 
 /// Monitor state: IO normal or in alert.
 enum State {
@@ -37,6 +37,9 @@ pub fn run_once(cfg: &Config, cli: &Cli) {
         quiet: cli.quiet,
     };
     let start_ticks = read_io_ticks(&cfg.device).unwrap_or(0);
+    if let Some(w) = unprivileged_warning() {
+        eprintln!("iowatchd: warning: {w}");
+    }
     let start = Instant::now();
     nap(cfg.interval);
     let ticks = read_io_ticks(&cfg.device).unwrap_or(start_ticks);
@@ -73,6 +76,10 @@ pub fn run(mut cfg: Config, cli: &Cli) {
     );
     // Tell systemd (Type=notify) that startup is complete.
     sd_notify(&format!("READY=1\nSTATUS=monitoring {}", cfg.device));
+    if let Some(w) = unprivileged_warning() {
+        logger.log("warning", &format!("warning: {w}"));
+    }
+    let mut last_util = 0.0;
 
     loop {
         nap(cfg.interval);
@@ -81,6 +88,27 @@ pub fn run(mut cfg: Config, cli: &Cli) {
             sd_notify("STOPPING=1");
             logger.log("stopped", "stopped");
             break;
+        }
+
+        // SIGUSR1: report the current state. The sample is skipped; the next
+        // one simply covers a longer period.
+        if STATUS.swap(false, Ordering::SeqCst) {
+            let name = match state {
+                State::Normal { .. } => "normal",
+                State::Alert { .. } => "alert",
+            };
+            logger.emit(
+                "status",
+                &format!(
+                    "status: device={} IO={last_util:.0}% state={name} threshold={}% interval={}s",
+                    cfg.device, cfg.threshold, cfg.interval
+                ),
+                &format!(
+                    "\"device\":{},\"util\":{last_util:.0},\"state\":\"{name}\"",
+                    json_str(&cfg.device)
+                ),
+            );
+            continue;
         }
 
         if RELOAD.swap(false, Ordering::SeqCst) {
@@ -122,6 +150,7 @@ pub fn run(mut cfg: Config, cli: &Cli) {
         );
         prev_ticks = ticks;
         prev_time = now;
+        last_util = util;
 
         if cli.verbose && !cli.quiet {
             println!("sample: IO={util:.0}% on {}", cfg.device);

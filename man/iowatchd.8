@@ -1,4 +1,4 @@
-.TH IOWATCHD 8 "October 2026" "iowatchd 0.2.0" "System Administration"
+.TH IOWATCHD 8 "October 2026" "iowatchd 0.3.0" "System Administration"
 .SH NAME
 iowatchd \- monitor disk IO usage and log which processes consume it
 .SH SYNOPSIS
@@ -17,7 +17,10 @@ simple rotation. Seeing all processes requires running as root.
 .SH OPTIONS
 .TP
 \fB\-c\fR, \fB\-\-config\fR \fIFILE\fR
-Configuration file. Default: \fI/etc/iowatchd.conf\fR, if it exists.
+Configuration file. Default: \fI/etc/iowatchd.conf\fR, if it exists, or the
+file named by \fB$IOWATCHD_CONFIG\fR. A file chosen explicitly must exist.
+Files matching \fIFILE\fR\fB.d/*.conf\fR are read afterwards, in alphabetical
+order, and override it.
 .TP
 \fB\-d\fR, \fB\-\-device\fR \fIDISK\fR
 Disk to monitor (\fBsda\fR, \fBnvme0n1\fR...). Default \fBauto\fR: the physical
@@ -53,13 +56,19 @@ Do not print to standard output (the log file is still written).
 \fB\-v\fR, \fB\-\-verbose\fR
 Also print every sample to standard output.
 .TP
+\fB\-L\fR, \fB\-\-list\-devices\fR
+List the disks that can be monitored (name, size, SSD/HDD, model) and mark the
+one chosen by \fBauto\fR. Exit.
+.TP
 \fB\-h\fR, \fB\-\-help\fR
 Show help and exit.
 .TP
 \fB\-V\fR, \fB\-\-version\fR
-Show the version and exit.
+Show the version, license and project URL, and exit.
 .PP
-Command-line options take precedence over the configuration file.
+Short options can be grouped (\fB\-jq\fR) and take attached values
+(\fB\-t80\fR). \fB\-\-\fR ends the options; mistyped long options get a
+suggestion. Command-line options take precedence over the configuration file.
 .SH CONFIGURATION
 See \fBiowatchd.conf\fR(5).
 .SH NOTIFICATIONS
@@ -72,8 +81,19 @@ sampling, a status line, and \fBSTOPPING=1\fR on shutdown, using
 Reload the configuration without restarting. If the new configuration is
 invalid, the current one is kept.
 .TP
+.B SIGUSR1
+Log the current status (device, last IO usage, state) without interrupting
+monitoring.
+.TP
 .BR SIGTERM ", " SIGINT
 Stop cleanly.
+.PP
+\fBSIGPIPE\fR has its default action, so \fBiowatchd \-\-once | head\fR ends
+quietly.
+.SH ENVIRONMENT
+.TP
+.B IOWATCHD_CONFIG
+Configuration file to use when \fB\-c\fR is not given.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -89,12 +109,19 @@ Usage error (invalid option).
 .I /etc/iowatchd.conf
 Configuration.
 .TP
+.I /etc/iowatchd.conf.d/*.conf
+Drop-in configuration overrides.
+.TP
 .I /var/log/iowatchd.log
 Alert log.
+.SH NOTES
+Without root privileges (or \fBCAP_SYS_PTRACE\fR) only the processes of the
+current user can be inspected; a warning is printed.
 .SH EXAMPLES
 .nf
 iowatchd \-\-once
 iowatchd \-d nvme0n1 \-t 60 \-\-once
+iowatchd \-\-list\-devices
 journalctl \-u iowatchd \-f
 .fi
 .SH SEE ALSO

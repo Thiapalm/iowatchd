@@ -1,4 +1,4 @@
-.TH IOWATCHD.CONF 5 "October 2026" "iowatchd 0.2.0" "File Formats"
+.TH IOWATCHD.CONF 5 "October 2026" "iowatchd 0.3.0" "File Formats"
 .SH NAME
 iowatchd.conf \- configuration file for iowatchd
 .SH DESCRIPTION
@@ -7,6 +7,11 @@ iowatchd.conf \- configuration file for iowatchd
 All keys are optional. Unknown keys and invalid values are reported as warnings
 (see \fBiowatchd \-\-check\-config\fR); an invalid value never replaces the
 default. Command-line options override the file. Send \fBSIGHUP\fR to reload.
+.PP
+After the main file, every \fI<file>.d/*.conf\fR (for example
+\fI/etc/iowatchd.conf.d/10-local.conf\fR) is read in alphabetical order and
+overrides earlier values. The main file can be chosen with \fB\-c\fR or
+\fB$IOWATCHD_CONFIG\fR.
 .SH KEYS
 .TP
 .B device

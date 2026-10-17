@@ -14,6 +14,8 @@ INSTALL_INIT   ?= systemd
 
 CARGO ?= cargo
 INSTALL ?= install
+# Binary to install; override for prebuilt release tarballs (BIN=./iowatchd).
+BIN ?= target/release/iowatchd
 
 .PHONY: all build test install uninstall clean
 
@@ -26,8 +28,8 @@ test:
 # DESTDIR is honoured for staged installs (packaging). Run `make` first:
 # install does not build, so `sudo make install` never runs cargo as root.
 install:
-	@test -x target/release/iowatchd || { echo "run 'make' first" >&2; exit 1; }
-	$(INSTALL) -D -m 755 target/release/iowatchd $(DESTDIR)$(BINDIR)/iowatchd
+	@test -x $(BIN) || { echo "run 'make' first (or set BIN=)" >&2; exit 1; }
+	$(INSTALL) -D -m 755 $(BIN) $(DESTDIR)$(BINDIR)/iowatchd
 	$(INSTALL) -D -m 755 iowatchd-log $(DESTDIR)$(BINDIR)/iowatchd-log
 	$(INSTALL) -D -m 644 man/iowatchd.8 $(DESTDIR)$(MANDIR)/man8/iowatchd.8
 	$(INSTALL) -D -m 644 man/iowatchd-log.1 $(DESTDIR)$(MANDIR)/man1/iowatchd-log.1

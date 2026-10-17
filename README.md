@@ -29,13 +29,14 @@ If the old installation (`ssd-io-monitor`) exists, `install.sh` removes it. Man 
     iowatchd --help                 options
     iowatchd --once                 one measurement, then exit
     iowatchd --once --json          same, as a JSON line
+    iowatchd --list-devices         list disks (marks the auto choice)
     iowatchd --check-config         validate and print the configuration
     iowatchd -d nvme0n1 -t 60       override disk and threshold
     man iowatchd                    full manual
 
-Options (`-c -d -t -i -n -j -o -C -f -q -v -h -V`) take precedence over the configuration file. Exit codes: 0 success, 1 runtime error, 2 usage error. `SIGHUP` reloads the configuration (`sudo systemctl reload iowatchd`); `SIGTERM`/`SIGINT` stop it cleanly. Under systemd the unit is `Type=notify`.
+Options (`-c -d -L -t -i -n -j -o -C -f -q -v -h -V`; short flags can be grouped, e.g. `-jq`) take precedence over the configuration file. Exit codes: 0 success, 1 runtime error, 2 usage error. `SIGHUP` reloads the configuration (`sudo systemctl reload iowatchd`); `SIGUSR1` logs the current status; `SIGTERM`/`SIGINT` stop it cleanly. The config path can come from `$IOWATCHD_CONFIG`, and `/etc/iowatchd.conf.d/*.conf` drop-ins override the main file. Under systemd the unit is `Type=notify`.
 
-Log shortcut: `iowatchd-log` (latest alerts), `iowatchd-log -f` (follow), `iowatchd-log -s` (status).
+Log shortcut: `iowatchd-log` (latest alerts), `iowatchd-log -f` (follow), `iowatchd-log -s` (status), `-n 50`, `--since '1 hour ago'`, `-j` (JSON). Prebuilt static binaries are attached to each GitHub release.
 
 Equivalent commands:
 

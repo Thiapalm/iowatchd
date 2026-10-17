@@ -9,13 +9,17 @@ use crate::disk::{detect_device, read_io_ticks};
 /// Configuration file read when `-c` is not given (if it exists).
 const DEFAULT_CONFIG: &str = "/etc/iowatchd.conf";
 
+/// Environment variable that selects the configuration file (like `-c`).
+const CONFIG_ENV: &str = "IOWATCHD_CONFIG";
+
 pub const USAGE: &str = "\
 iowatchd - monitors disk IO usage and logs which processes are consuming it
 
 Usage: iowatchd [OPTIONS]
 
 Options:
-  -c, --config FILE       configuration file (default: /etc/iowatchd.conf)
+  -c, --config FILE       configuration file (default: /etc/iowatchd.conf,
+                          or $IOWATCHD_CONFIG); FILE.d/*.conf is read after it
   -d, --device DISK       disk to monitor, e.g. sda, nvme0n1 (default: auto)
   -t, --threshold PCT     IO usage % that triggers an alert (1-100)
   -i, --interval SEC      seconds between samples (minimum 1)
@@ -23,6 +27,7 @@ Options:
   -j, --json              log one JSON object per line
   -o, --once              take a single measurement, print it and exit
   -C, --check-config      validate the configuration, print it and exit
+  -L, --list-devices      list the disks that can be monitored and exit
   -f, --foreground        run in the foreground (the default; accepted for
                           compatibility with service managers)
   -q, --quiet             do not print to stdout (the log file still works)
@@ -30,14 +35,27 @@ Options:
   -h, --help              show this help
   -V, --version           show the version
 
-Command-line options take precedence over the configuration file.
-SIGHUP reloads the configuration; SIGTERM/SIGINT stop the program.
+Short options can be grouped (-jq) and take attached values (-t80).
+Use -- to end the options. Command-line options take precedence over the
+configuration file.
+SIGHUP reloads the configuration; SIGUSR1 logs the current status;
+SIGTERM/SIGINT stop the program.
 Exit codes: 0 success, 1 runtime error, 2 usage error.
 
 Examples:
   iowatchd --once                 measure the root disk for one interval
   iowatchd -d nvme0n1 -t 60       monitor nvme0n1 with a 60% threshold
-  iowatchd --check-config         validate /etc/iowatchd.conf";
+  iowatchd --check-config         validate /etc/iowatchd.conf
+  iowatchd --list-devices         show the available disks";
+
+/// Text printed by `--version`.
+pub fn version_text() -> String {
+    format!(
+        "iowatchd {}\nCopyright (c) Thiapalm. Licensed under the MIT license.\n{}",
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_REPOSITORY")
+    )
+}
 
 /// Options given on the command line; `None` means "not provided".
 #[derive(Debug, Default, PartialEq)]
@@ -50,6 +68,7 @@ pub struct Cli {
     pub json: bool,
     pub once: bool,
     pub check_config: bool,
+    pub list_devices: bool,
     pub quiet: bool,
     pub verbose: bool,
 }
@@ -62,84 +81,237 @@ pub enum Parsed {
     Run(Cli),
 }
 
+/// Every long option name (without the leading `--`).
+const LONG_OPTIONS: &[&str] = &[
+    "help",
+    "version",
+    "once",
+    "json",
+    "check-config",
+    "list-devices",
+    "foreground",
+    "quiet",
+    "verbose",
+    "config",
+    "device",
+    "threshold",
+    "interval",
+    "top",
+];
+
+/// Maps a short option letter to its long name.
+fn long_for_short(c: char) -> Option<&'static str> {
+    Some(match c {
+        'h' => "help",
+        'V' => "version",
+        'o' => "once",
+        'j' => "json",
+        'C' => "check-config",
+        'L' => "list-devices",
+        'f' => "foreground",
+        'q' => "quiet",
+        'v' => "verbose",
+        'c' => "config",
+        'd' => "device",
+        't' => "threshold",
+        'i' => "interval",
+        'n' => "top",
+        _ => return None,
+    })
+}
+
+fn takes_value(long: &str) -> bool {
+    matches!(long, "config" | "device" | "threshold" | "interval" | "top")
+}
+
+/// Edit distance between two short strings (for "did you mean" hints).
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, &cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur.push((prev[j] + cost).min(prev[j + 1] + 1).min(cur[j] + 1));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// Closest known long option to a mistyped one, if it is close enough.
+fn suggest(name: &str) -> Option<&'static str> {
+    LONG_OPTIONS
+        .iter()
+        .map(|&o| (edit_distance(name, o), o))
+        .filter(|&(d, _)| d <= 2 && d < name.len())
+        .min()
+        .map(|(_, o)| o)
+}
+
+/// Applies one option to `cli`. `shown` is how the user typed it (for
+/// messages). Returns `Some` for options that end parsing (help, version).
+fn apply(
+    cli: &mut Cli,
+    long: &str,
+    value: Option<String>,
+    shown: &str,
+) -> Result<Option<Parsed>, String> {
+    let bad = |v: &str| format!("invalid value for '{shown}': '{v}'");
+    let value = if takes_value(long) {
+        Some(value.ok_or_else(|| format!("option '{shown}' requires a value"))?)
+    } else if value.is_some() {
+        return Err(format!("option '{shown}' does not take a value"));
+    } else {
+        None
+    };
+
+    match (long, value) {
+        ("help", _) => return Ok(Some(Parsed::Help)),
+        ("version", _) => return Ok(Some(Parsed::Version)),
+        ("once", _) => cli.once = true,
+        ("json", _) => cli.json = true,
+        ("check-config", _) => cli.check_config = true,
+        ("list-devices", _) => cli.list_devices = true,
+        ("foreground", _) => {}
+        ("quiet", _) => cli.quiet = true,
+        ("verbose", _) => cli.verbose = true,
+        ("config", Some(v)) => cli.config = Some(v),
+        ("device", Some(v)) => cli.device = Some(v),
+        ("threshold", Some(v)) => {
+            let t: f64 = v.parse().map_err(|_| bad(&v))?;
+            if !(t > 0.0 && t <= 100.0) {
+                return Err(bad(&v));
+            }
+            cli.threshold = Some(t);
+        }
+        ("interval", Some(v)) => {
+            cli.interval = Some(v.parse().ok().filter(|&n| n >= 1).ok_or_else(|| bad(&v))?);
+        }
+        ("top", Some(v)) => {
+            cli.top_n = Some(v.parse().ok().filter(|&n| n >= 1).ok_or_else(|| bad(&v))?);
+        }
+        _ => unreachable!("option table out of sync: {long}"),
+    }
+    Ok(None)
+}
+
 impl Cli {
     /// Parses the arguments (without the program name). Accepts
-    /// `--option value`, `--option=value` and `-o value`. Errors are
+    /// `--option value`, `--option=value`, `-o value`, `-ovalue`, grouped
+    /// short flags (`-jq`) and `--` to end the options. Errors are
     /// ready-to-display messages (exit code 2).
     pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Parsed, String> {
         let mut cli = Cli::default();
         let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
-            // Split `--option=value` into name and embedded value.
-            let (name, inline) = match arg.split_once('=') {
-                Some((n, v)) if n.starts_with("--") => (n.to_string(), Some(v.to_string())),
-                _ => (arg.clone(), None),
-            };
+            if arg == "--" {
+                // No positional arguments exist, so anything after `--` is an error.
+                return match args.next() {
+                    Some(extra) => Err(format!("unexpected argument '{extra}'")),
+                    None => Ok(Parsed::Run(cli)),
+                };
+            }
 
-            // Option value: the embedded one or the next argument.
-            let value = |args: &mut dyn Iterator<Item = String>| -> Result<String, String> {
-                inline
-                    .clone()
-                    .or_else(|| args.next())
-                    .ok_or_else(|| format!("option '{name}' requires a value"))
-            };
-            let bad = |v: &str| format!("invalid value for '{name}': '{v}'");
-
-            match name.as_str() {
-                "-h" | "--help" => return Ok(Parsed::Help),
-                "-V" | "--version" => return Ok(Parsed::Version),
-                "-o" | "--once" => cli.once = true,
-                "-j" | "--json" => cli.json = true,
-                "-C" | "--check-config" => cli.check_config = true,
-                "-f" | "--foreground" => {}
-                "-q" | "--quiet" => cli.quiet = true,
-                "-v" | "--verbose" => cli.verbose = true,
-                "-c" | "--config" => cli.config = Some(value(&mut args)?),
-                "-d" | "--device" => cli.device = Some(value(&mut args)?),
-                "-t" | "--threshold" => {
-                    let v = value(&mut args)?;
-                    let t: f64 = v.parse().map_err(|_| bad(&v))?;
-                    if !(t > 0.0 && t <= 100.0) {
-                        return Err(bad(&v));
+            if let Some(rest) = arg.strip_prefix("--") {
+                let (name, inline) = match rest.split_once('=') {
+                    Some((n, v)) => (n, Some(v.to_string())),
+                    None => (rest, None),
+                };
+                let Some(&long) = LONG_OPTIONS.iter().find(|&&o| o == name) else {
+                    return Err(match suggest(name) {
+                        Some(s) => format!("unknown option '--{name}' (did you mean '--{s}'?)"),
+                        None => format!("unknown option '--{name}'"),
+                    });
+                };
+                let value = match inline {
+                    None if takes_value(long) => args.next(),
+                    other => other,
+                };
+                if let Some(done) = apply(&mut cli, long, value, &format!("--{long}"))? {
+                    return Ok(done);
+                }
+            } else if arg.len() > 1 && arg.starts_with('-') {
+                // A cluster of short options; a value option consumes the
+                // rest of the cluster (`-t80`) or the next argument.
+                let letters: Vec<char> = arg[1..].chars().collect();
+                for (i, &c) in letters.iter().enumerate() {
+                    let Some(long) = long_for_short(c) else {
+                        return Err(format!("unknown option '-{c}'"));
+                    };
+                    let shown = format!("-{c}");
+                    if takes_value(long) {
+                        let attached: String = letters[i + 1..].iter().collect();
+                        let value = if attached.is_empty() {
+                            args.next()
+                        } else {
+                            Some(attached)
+                        };
+                        if let Some(done) = apply(&mut cli, long, value, &shown)? {
+                            return Ok(done);
+                        }
+                        break;
                     }
-                    cli.threshold = Some(t);
+                    if let Some(done) = apply(&mut cli, long, None, &shown)? {
+                        return Ok(done);
+                    }
                 }
-                "-i" | "--interval" => {
-                    let v = value(&mut args)?;
-                    cli.interval = Some(v.parse().ok().filter(|&n| n >= 1).ok_or_else(|| bad(&v))?);
-                }
-                "-n" | "--top" => {
-                    let v = value(&mut args)?;
-                    cli.top_n = Some(v.parse().ok().filter(|&n| n >= 1).ok_or_else(|| bad(&v))?);
-                }
-                other if other.starts_with('-') => return Err(format!("unknown option '{other}'")),
-                other => return Err(format!("unexpected argument '{other}'")),
+            } else {
+                return Err(format!("unexpected argument '{arg}'"));
             }
         }
         Ok(Parsed::Run(cli))
     }
 }
 
-/// Builds the final configuration: defaults < file < command line, and
-/// resolves `device = auto`. Returns the configuration together with the
-/// warnings found while parsing the file. Also used when reloading (SIGHUP).
+/// Path of the configuration file and whether it was chosen explicitly
+/// (`-c` or `$IOWATCHD_CONFIG`), in which case it must exist.
+fn config_path(cli: &Cli) -> (String, bool) {
+    if let Some(p) = &cli.config {
+        return (p.clone(), true);
+    }
+    match std::env::var(CONFIG_ENV) {
+        Ok(p) if !p.is_empty() => (p, true),
+        _ => (DEFAULT_CONFIG.to_string(), false),
+    }
+}
+
+/// Drop-in files `<config>.d/*.conf`, in alphabetical order.
+fn dropins(path: &str) -> Vec<String> {
+    let mut files: Vec<String> = fs::read_dir(format!("{path}.d"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "conf"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    files.sort();
+    files
+}
+
+/// Builds the final configuration: defaults < file < drop-ins < command
+/// line, and resolves `device = auto`. Returns the configuration together
+/// with the warnings found while parsing the files. Also used when
+/// reloading (SIGHUP).
 fn load_config(cli: &Cli) -> Result<(Config, Vec<String>), String> {
     let mut cfg = Config::default();
     let mut warnings = Vec::new();
 
-    // With -c the file is mandatory; without it, use the default if it exists.
-    let path = cli.config.as_deref().unwrap_or(DEFAULT_CONFIG);
-    match fs::read_to_string(path) {
-        Ok(text) => {
-            let (parsed, found) = Config::parse(&text);
-            warnings = found.into_iter().map(|w| format!("{path}: {w}")).collect();
-            cfg = parsed;
+    // An explicit file is mandatory; the default one is used only if it exists.
+    let (path, explicit) = config_path(cli);
+    let mut sources = vec![path.clone()];
+    sources.extend(dropins(&path));
+    for (n, file) in sources.iter().enumerate() {
+        match fs::read_to_string(file) {
+            Ok(text) => {
+                warnings.extend(cfg.apply(&text).into_iter().map(|w| format!("{file}: {w}")));
+            }
+            Err(e) if n == 0 && explicit => return Err(format!("could not read {file}: {e}")),
+            Err(e) if n > 0 => warnings.push(format!("{file}: could not read: {e}")),
+            Err(_) => {}
         }
-        Err(e) if cli.config.is_some() => {
-            return Err(format!("could not read {path}: {e}"));
-        }
-        Err(_) => {}
     }
 
     if let Some(d) = &cli.device {
@@ -166,7 +338,7 @@ fn load_config(cli: &Cli) -> Result<(Config, Vec<String>), String> {
     }
     if read_io_ticks(&cfg.device).is_none() {
         return Err(format!(
-            "device '{}' not found in /proc/diskstats",
+            "device '{}' not found in /proc/diskstats (see --list-devices)",
             cfg.device
         ));
     }
@@ -226,26 +398,57 @@ mod tests {
         Cli::parse(v.iter().map(|s| s.to_string()))
     }
 
+    fn run(v: &[&str]) -> Cli {
+        match parse(v) {
+            Ok(Parsed::Run(c)) => c,
+            other => panic!("expected Run, got {other:?}"),
+        }
+    }
+
     #[test]
-    fn accepts_new_flags() {
-        let Ok(Parsed::Run(c)) = parse(&["-j", "-q", "-v", "-C", "-f"]) else {
-            panic!("parse failed")
-        };
-        assert!(c.json && c.quiet && c.verbose && c.check_config);
+    fn accepts_flags() {
+        let c = run(&["-j", "-q", "-v", "-C", "-f", "-L"]);
+        assert!(c.json && c.quiet && c.verbose && c.check_config && c.list_devices);
     }
 
     #[test]
     fn accepts_long_short_and_equals_forms() {
         assert_eq!(parse(&["-h"]), Ok(Parsed::Help));
         assert_eq!(parse(&["--version"]), Ok(Parsed::Version));
-        let Ok(Parsed::Run(c)) = parse(&["-d", "nvme0n1", "--threshold=60", "-i", "5", "--once"])
-        else {
-            panic!("parse failed")
-        };
+        let c = run(&["-d", "nvme0n1", "--threshold=60", "-i", "5", "--once"]);
         assert_eq!(c.device.as_deref(), Some("nvme0n1"));
         assert_eq!(c.threshold, Some(60.0));
         assert_eq!(c.interval, Some(5));
         assert!(c.once);
+    }
+
+    #[test]
+    fn accepts_grouped_flags_and_attached_values() {
+        let c = run(&["-jqv"]);
+        assert!(c.json && c.quiet && c.verbose);
+        let c = run(&["-t80", "-oi3", "-dsda"]);
+        assert_eq!(c.threshold, Some(80.0));
+        assert_eq!(c.interval, Some(3));
+        assert_eq!(c.device.as_deref(), Some("sda"));
+        assert!(c.once);
+        // A value option inside a cluster takes the next argument.
+        let c = run(&["-jt", "70"]);
+        assert!(c.json);
+        assert_eq!(c.threshold, Some(70.0));
+    }
+
+    #[test]
+    fn double_dash_ends_options() {
+        assert_eq!(parse(&["--"]), Ok(Parsed::Run(Cli::default())));
+        assert!(parse(&["-j", "--", "x"]).is_err());
+    }
+
+    #[test]
+    fn suggests_similar_options() {
+        let e = parse(&["--thresold=5"]).unwrap_err();
+        assert!(e.contains("did you mean '--threshold'"), "{e}");
+        let e = parse(&["--zzzzzz"]).unwrap_err();
+        assert!(!e.contains("did you mean"), "{e}");
     }
 
     #[test]
@@ -257,5 +460,7 @@ mod tests {
         assert!(parse(&["-t", "101"]).is_err());
         assert!(parse(&["-i", "0"]).is_err());
         assert!(parse(&["-n", "abc"]).is_err());
+        assert!(parse(&["-x"]).is_err());
+        assert!(parse(&["--json=1"]).is_err());
     }
 }
