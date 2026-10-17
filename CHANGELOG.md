@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-10-17
+
+### Added
+- `iowatchd-notify`: desktop pop-up helper for `notify_command`, shown on
+  every logged-in session (alerts throttled to one per minute).
+
 ## [0.4.0] - 2026-10-17
 
 ### Added
