@@ -20,7 +20,7 @@ Or with make (`PREFIX`, `DESTDIR`, `SYSTEMDUNITDIR` are honoured):
 
     make && sudo make install
 
-Prebuilt static binaries are on the GitHub releases page; `cargo install iowatchd` builds from crates.io, and `cargo binstall iowatchd` downloads the prebuilt binary (from 0.4.2).
+Prebuilt static binaries are on the GitHub releases page; `cargo install iowatchd` builds from crates.io, and `cargo binstall iowatchd` downloads the prebuilt binary.
 
 Packaging recipes are in `packaging/`: Arch (`PKGBUILD`, and `arch-bin/` for the prebuilt variant), Homebrew (`homebrew/iowatchd.rb`, for a personal tap), RPM (`iowatchd.spec`) and Debian (`debian/`; copy it to the source root and run `dpkg-buildpackage -us -uc`). The RPM and Debian recipes are untested.
 
