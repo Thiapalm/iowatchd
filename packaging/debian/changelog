@@ -1,0 +1,5 @@
+iowatchd (0.2.0-1) unstable; urgency=medium
+
+  * Initial Debian packaging.
+
+ -- Thiapalm <thiago.palmieri@gmail.com>  Sat, 17 Oct 2026 12:00:00 -0300

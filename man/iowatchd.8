@@ -1,4 +1,4 @@
-.TH IOWATCHD 8 "October 2026" "iowatchd 0.1.0" "System Administration"
+.TH IOWATCHD 8 "October 2026" "iowatchd 0.2.0" "System Administration"
 .SH NAME
 iowatchd \- monitor disk IO usage and log which processes consume it
 .SH SYNOPSIS
@@ -32,8 +32,26 @@ Seconds between samples (minimum 1). Default 2.
 \fB\-n\fR, \fB\-\-top\fR \fIN\fR
 Number of processes listed in each report. Default 5.
 .TP
+\fB\-j\fR, \fB\-\-json\fR
+Write one JSON object per line (keys \fBtime\fR, \fBevent\fR, \fBmessage\fR and,
+for alerts, a \fBprocesses\fR array) instead of plain text.
+.TP
 \fB\-o\fR, \fB\-\-once\fR
 Take a single measurement, print the result to standard output and exit.
+.TP
+\fB\-C\fR, \fB\-\-check\-config\fR
+Validate the configuration, print the effective settings and exit. Exits with
+status 1 if there are errors or warnings.
+.TP
+\fB\-f\fR, \fB\-\-foreground\fR
+Run in the foreground. This is already the default; the option is accepted for
+compatibility with service managers.
+.TP
+\fB\-q\fR, \fB\-\-quiet\fR
+Do not print to standard output (the log file is still written).
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+Also print every sample to standard output.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Show help and exit.
@@ -43,10 +61,11 @@ Show the version and exit.
 .PP
 Command-line options take precedence over the configuration file.
 .SH CONFIGURATION
-A file of \fBkey = value\fR lines; \fB#\fR starts a comment. Keys:
-\fBdevice\fR, \fBthreshold\fR, \fBclear_threshold\fR, \fBinterval\fR,
-\fBtrigger_samples\fR, \fBprocess_window\fR, \fBtop_n\fR, \fBcooldown\fR,
-\fBlog_file\fR and \fBlog_max_mb\fR. See the comments in \fI/etc/iowatchd.conf\fR.
+See \fBiowatchd.conf\fR(5).
+.SH NOTIFICATIONS
+Under systemd (\fBType=notify\fR) the daemon sends \fBREADY=1\fR once it is
+sampling, a status line, and \fBSTOPPING=1\fR on shutdown, using
+\fB$NOTIFY_SOCKET\fR. Without that variable nothing is sent.
 .SH SIGNALS
 .TP
 .B SIGHUP
@@ -79,6 +98,7 @@ iowatchd \-d nvme0n1 \-t 60 \-\-once
 journalctl \-u iowatchd \-f
 .fi
 .SH SEE ALSO
+.BR iowatchd.conf (5),
 .BR iowatchd-log (1),
 .BR iostat (1),
 .BR iotop (8)

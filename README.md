@@ -11,18 +11,29 @@ Monitors disk IO usage (`%util`, the same as `iostat -x`) and, when it goes abov
 
 ## Installation
 
-    ./install.sh
+From source (detects the init system, installs and starts the service):
 
-If the old installation (`ssd-io-monitor`) exists, it is removed.
+    ./install.sh
+    ./install.sh uninstall      # keeps /etc/iowatchd.conf and the log
+
+Or with make (`PREFIX`, `DESTDIR`, `SYSTEMDUNITDIR` are honoured):
+
+    make && sudo make install
+
+Packaging recipes are in `packaging/`: Arch (`PKGBUILD`), RPM (`iowatchd.spec`) and Debian (`debian/`; copy it to the source root and run `dpkg-buildpackage -us -uc`). The RPM and Debian recipes are untested.
+
+If the old installation (`ssd-io-monitor`) exists, `install.sh` removes it. Man pages (`iowatchd(8)`, `iowatchd.conf(5)`, `iowatchd-log(1)`), bash/zsh/fish completions and a logrotate file are installed too.
 
 ## Usage
 
     iowatchd --help                 options
     iowatchd --once                 one measurement, then exit
+    iowatchd --once --json          same, as a JSON line
+    iowatchd --check-config         validate and print the configuration
     iowatchd -d nvme0n1 -t 60       override disk and threshold
     man iowatchd                    full manual
 
-Options (`-c`, `-d`, `-t`, `-i`, `-n`, `-o`, `-h`, `-V`) take precedence over the configuration file. Exit codes: 0 success, 1 runtime error, 2 usage error. `SIGHUP` reloads the configuration (`sudo systemctl reload iowatchd`); `SIGTERM`/`SIGINT` stop it cleanly.
+Options (`-c -d -t -i -n -j -o -C -f -q -v -h -V`) take precedence over the configuration file. Exit codes: 0 success, 1 runtime error, 2 usage error. `SIGHUP` reloads the configuration (`sudo systemctl reload iowatchd`); `SIGTERM`/`SIGINT` stop it cleanly. Under systemd the unit is `Type=notify`.
 
 Log shortcut: `iowatchd-log` (latest alerts), `iowatchd-log -f` (follow), `iowatchd-log -s` (status).
 
@@ -39,12 +50,11 @@ Example log entries:
 
 ## Configuration
 
-`/etc/iowatchd.conf` (template in `config.conf`). After editing: `sudo systemctl restart iowatchd`.
+`/etc/iowatchd.conf` (template in `config.conf`, documented in `man iowatchd.conf`). After editing: `sudo systemctl reload iowatchd`. Set `log_format = json` for JSON lines, or `log_max_mb = 0` to let logrotate manage the file.
 
 ## Development
 
-    cargo test
-    cargo build --release
+    cargo fmt --check && cargo clippy --all-targets && cargo test
 
 ## License
 

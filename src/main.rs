@@ -46,8 +46,11 @@ struct Config {
     cooldown: u64,
     /// Log file in addition to stdout/journald (`None` disables it).
     log_file: Option<PathBuf>,
-    /// Maximum log file size (bytes) before rotating.
+    /// Maximum log file size (bytes) before rotating; 0 disables the built-in
+    /// rotation (useful when logrotate manages the file).
     log_max_bytes: u64,
+    /// Log format: plain text or one JSON object per line.
+    log_json: bool,
 }
 
 impl Default for Config {
@@ -63,6 +66,7 @@ impl Default for Config {
             cooldown: 10,
             log_file: Some(PathBuf::from("/var/log/iowatchd.log")),
             log_max_bytes: 5 * 1024 * 1024,
+            log_json: false,
         }
     }
 }
@@ -99,13 +103,28 @@ impl Config {
                 "top_n" => value.parse().map(|v| cfg.top_n = v).is_ok(),
                 "cooldown" => value.parse().map(|v| cfg.cooldown = v).is_ok(),
                 "log_file" => {
-                    cfg.log_file = if value.is_empty() { None } else { Some(value.into()) };
+                    cfg.log_file = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.into())
+                    };
                     true
                 }
                 "log_max_mb" => value
                     .parse::<u64>()
                     .map(|v| cfg.log_max_bytes = v * 1024 * 1024)
                     .is_ok(),
+                "log_format" => match value {
+                    "text" => {
+                        cfg.log_json = false;
+                        true
+                    }
+                    "json" => {
+                        cfg.log_json = true;
+                        true
+                    }
+                    _ => false,
+                },
                 _ => {
                     warnings.push(format!("line {}: unknown key '{}'", n + 1, key));
                     true
@@ -138,17 +157,72 @@ impl Config {
 struct Logger {
     file: Option<PathBuf>,
     max_bytes: u64,
+    /// Emit one JSON object per line instead of plain text.
+    json: bool,
+    /// Do not print to stdout (the log file still receives entries).
+    quiet: bool,
+}
+
+/// Escapes a string as a JSON string literal (including the quotes).
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 impl Logger {
-    /// Writes a line to stdout (captured by journald, which already adds a
+    /// Logs a simple event that has no extra structured data.
+    fn log(&self, kind: &str, text: &str) {
+        self.emit(kind, text, "");
+    }
+
+    /// Writes an event to stdout (captured by journald, which already adds a
     /// timestamp) and to the log file (with its own timestamp).
-    fn log(&self, msg: &str) {
-        println!("{msg}");
+    ///
+    /// `fields` holds extra pre-rendered JSON members (without the braces),
+    /// e.g. `"device":"sda","util":94`; they are only used in JSON mode.
+    fn emit(&self, kind: &str, text: &str, fields: &str) {
+        let ts = timestamp();
+        let (stdout_line, file_line) = if self.json {
+            let extra = if fields.is_empty() {
+                String::new()
+            } else {
+                format!(",{fields}")
+            };
+            let line = format!(
+                "{{\"time\":{},\"event\":{},\"message\":{}{extra}}}",
+                json_str(&ts),
+                json_str(kind),
+                json_str(text)
+            );
+            (line.clone(), line)
+        } else {
+            (text.to_string(), format!("{ts} {text}"))
+        };
+
+        if !self.quiet {
+            println!("{stdout_line}");
+        }
         let Some(path) = &self.file else { return };
 
         // Rotation: past the size limit, the current file becomes `<file>.1`.
-        if fs::metadata(path).map(|m| m.len() > self.max_bytes).unwrap_or(false) {
+        if self.max_bytes > 0
+            && fs::metadata(path)
+                .map(|m| m.len() > self.max_bytes)
+                .unwrap_or(false)
+        {
             let mut old = path.clone().into_os_string();
             old.push(".1");
             let _ = fs::rename(path, old);
@@ -156,7 +230,7 @@ impl Logger {
 
         match OpenOptions::new().create(true).append(true).open(path) {
             Ok(mut f) => {
-                let _ = writeln!(f, "{} {}", timestamp(), msg);
+                let _ = writeln!(f, "{file_line}");
             }
             Err(e) => eprintln!("warning: could not write to {}: {e}", path.display()),
         }
@@ -192,8 +266,17 @@ fn timestamp() -> String {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let mut tm = Tm {
-        sec: 0, min: 0, hour: 0, mday: 0, mon: 0, year: 0,
-        wday: 0, yday: 0, isdst: 0, gmtoff: 0, zone: std::ptr::null(),
+        sec: 0,
+        min: 0,
+        hour: 0,
+        mday: 0,
+        mon: 0,
+        year: 0,
+        wday: 0,
+        yday: 0,
+        isdst: 0,
+        gmtoff: 0,
+        zone: std::ptr::null(),
     };
     // SAFETY: `tm` is valid and writable for the duration of the call; `secs` is only read.
     let ok = unsafe { !localtime_r(&secs, &mut tm).is_null() };
@@ -202,7 +285,12 @@ fn timestamp() -> String {
     }
     format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-        tm.year + 1900, tm.mon + 1, tm.mday, tm.hour, tm.min, tm.sec
+        tm.year + 1900,
+        tm.mon + 1,
+        tm.mday,
+        tm.hour,
+        tm.min,
+        tm.sec
     )
 }
 
@@ -214,18 +302,15 @@ fn timestamp() -> String {
 /// the filesystem mounted on `/`. If there are several mounts on `/`, the
 /// last one wins (the one on top).
 fn parse_root_source(mountinfo: &str) -> Option<String> {
-    mountinfo
-        .lines()
-        .filter_map(|line| {
-            // Format: "... mount_point options... - fstype source options"
-            let (head, tail) = line.split_once(" - ")?;
-            if head.split_whitespace().nth(4)? != "/" {
-                return None;
-            }
-            let source = tail.split_whitespace().nth(1)?;
-            source.starts_with("/dev/").then(|| source.to_string())
-        })
-        .last()
+    mountinfo.lines().rev().find_map(|line| {
+        // Format: "... mount_point options... - fstype source options"
+        let (head, tail) = line.split_once(" - ")?;
+        if head.split_whitespace().nth(4)? != "/" {
+            return None;
+        }
+        let source = tail.split_whitespace().nth(1)?;
+        source.starts_with("/dev/").then(|| source.to_string())
+    })
 }
 
 /// Given a block device name (partition, LVM, LUKS...), returns the physical
@@ -237,9 +322,11 @@ fn physical_disk(name: &str, depth: u32) -> Option<String> {
     if depth > 8 || !sys.exists() {
         return None;
     }
-    let first_slave = fs::read_dir(sys.join("slaves"))
-        .ok()
-        .and_then(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).min());
+    let first_slave = fs::read_dir(sys.join("slaves")).ok().and_then(|d| {
+        d.flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .min()
+    });
     if let Some(slave) = first_slave {
         return physical_disk(&slave, depth + 1);
     }
@@ -341,10 +428,16 @@ fn parse_proc_io(text: &str) -> Option<ProcIo> {
 /// Takes a "snapshot" of the IO counters of every visible process.
 fn snapshot_processes() -> HashMap<u32, ProcIo> {
     let mut map = HashMap::new();
-    let Ok(dir) = fs::read_dir("/proc") else { return map };
+    let Ok(dir) = fs::read_dir("/proc") else {
+        return map;
+    };
     for entry in dir.flatten() {
         // Numeric directories under /proc are PIDs.
-        if let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) {
+        if let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|s| s.parse::<u32>().ok())
+        {
             if let Some(io) = read_proc_io(pid) {
                 map.insert(pid, io);
             }
@@ -362,7 +455,11 @@ struct ProcUsage {
 
 /// Compares two snapshots and returns the `n` processes that did the most IO,
 /// in descending order (reads + writes).
-fn top_processes(before: &HashMap<u32, ProcIo>, after: &HashMap<u32, ProcIo>, n: usize) -> Vec<ProcUsage> {
+fn top_processes(
+    before: &HashMap<u32, ProcIo>,
+    after: &HashMap<u32, ProcIo>,
+    n: usize,
+) -> Vec<ProcUsage> {
     let mut usage: Vec<ProcUsage> = after
         .iter()
         .map(|(&pid, now)| {
@@ -376,7 +473,7 @@ fn top_processes(before: &HashMap<u32, ProcIo>, after: &HashMap<u32, ProcIo>, n:
         })
         .filter(|u| u.read + u.write > 0)
         .collect();
-    usage.sort_by(|a, b| (b.read + b.write).cmp(&(a.read + a.write)));
+    usage.sort_by_key(|u| std::cmp::Reverse(u.read + u.write));
     usage.truncate(n);
     usage
 }
@@ -391,7 +488,10 @@ fn process_name(pid: u32) -> String {
 /// Full command line, truncated so it does not clutter the log.
 fn process_cmdline(pid: u32) -> String {
     let raw = fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
-    let text: String = String::from_utf8_lossy(&raw).replace('\0', " ").trim().to_string();
+    let text: String = String::from_utf8_lossy(&raw)
+        .replace('\0', " ")
+        .trim()
+        .to_string();
     if text.chars().count() > 100 {
         let cut: String = text.chars().take(100).collect();
         format!("{cut}...")
@@ -407,7 +507,11 @@ fn process_user(pid: u32, users: &HashMap<u32, String>) -> String {
         .and_then(|s| {
             s.lines()
                 .find_map(|l| l.strip_prefix("Uid:"))
-                .and_then(|v| v.split_whitespace().next().and_then(|u| u.parse::<u32>().ok()))
+                .and_then(|v| {
+                    v.split_whitespace()
+                        .next()
+                        .and_then(|u| u.parse::<u32>().ok())
+                })
         });
     match uid {
         Some(u) => users.get(&u).cloned().unwrap_or_else(|| u.to_string()),
@@ -450,32 +554,61 @@ fn report_top_processes(cfg: &Config, logger: &Logger, util: f64) {
     let secs = start.elapsed().as_secs_f64().max(0.001);
 
     let top = top_processes(&before, &after, cfg.top_n);
+    let dev = json_str(&cfg.device);
     if top.is_empty() {
-        logger.log(&format!(
-            "ALERT IO={util:.0}% on {} | no visible process did IO in the window (kernel/journal IO?)",
-            cfg.device
-        ));
+        logger.emit(
+            "alert",
+            &format!(
+                "ALERT IO={util:.0}% on {} | no visible process did IO in the window (kernel/journal IO?)",
+                cfg.device
+            ),
+            &format!("\"device\":{dev},\"util\":{util:.0},\"processes\":[]"),
+        );
         return;
     }
 
     let users = load_users();
-    let list: Vec<String> = top
-        .iter()
-        .enumerate()
-        .map(|(i, u)| {
-            format!(
-                "{}) {} pid={} user={} R={} W={} cmd=\"{}\"",
-                i + 1,
-                process_name(u.pid),
-                u.pid,
-                process_user(u.pid, &users),
-                human_rate(u.read as f64 / secs),
-                human_rate(u.write as f64 / secs),
-                process_cmdline(u.pid),
-            )
-        })
-        .collect();
-    logger.log(&format!("ALERT IO={util:.0}% on {} | {}", cfg.device, list.join(" | ")));
+    let mut list = Vec::new();
+    let mut json_list = Vec::new();
+    for (i, u) in top.iter().enumerate() {
+        let (name, user, cmd) = (
+            process_name(u.pid),
+            process_user(u.pid, &users),
+            process_cmdline(u.pid),
+        );
+        let (read, write) = (u.read as f64 / secs, u.write as f64 / secs);
+        list.push(format!(
+            "{}) {} pid={} user={} R={} W={} cmd=\"{}\"",
+            i + 1,
+            name,
+            u.pid,
+            user,
+            human_rate(read),
+            human_rate(write),
+            cmd
+        ));
+        json_list.push(format!(
+            "{{\"pid\":{},\"name\":{},\"user\":{},\"read_bytes_per_s\":{:.0},\"write_bytes_per_s\":{:.0},\"cmd\":{}}}",
+            u.pid,
+            json_str(&name),
+            json_str(&user),
+            read,
+            write,
+            json_str(&cmd)
+        ));
+    }
+    logger.emit(
+        "alert",
+        &format!(
+            "ALERT IO={util:.0}% on {} | {}",
+            cfg.device,
+            list.join(" | ")
+        ),
+        &format!(
+            "\"device\":{dev},\"util\":{util:.0},\"processes\":[{}]",
+            json_list.join(",")
+        ),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -496,7 +629,13 @@ Options:
   -t, --threshold PCT     IO usage % that triggers an alert (1-100)
   -i, --interval SEC      seconds between samples (minimum 1)
   -n, --top N             number of processes listed per alert
+  -j, --json              log one JSON object per line
   -o, --once              take a single measurement, print it and exit
+  -C, --check-config      validate the configuration, print it and exit
+  -f, --foreground        run in the foreground (the default; accepted for
+                          compatibility with service managers)
+  -q, --quiet             do not print to stdout (the log file still works)
+  -v, --verbose           also print every sample to stdout
   -h, --help              show this help
   -V, --version           show the version
 
@@ -506,7 +645,8 @@ Exit codes: 0 success, 1 runtime error, 2 usage error.
 
 Examples:
   iowatchd --once                 measure the root disk for one interval
-  iowatchd -d nvme0n1 -t 60       monitor nvme0n1 with a 60% threshold";
+  iowatchd -d nvme0n1 -t 60       monitor nvme0n1 with a 60% threshold
+  iowatchd --check-config         validate /etc/iowatchd.conf";
 
 /// Options given on the command line; `None` means \"not provided\".
 #[derive(Debug, Default, PartialEq)]
@@ -516,7 +656,11 @@ struct Cli {
     threshold: Option<f64>,
     interval: Option<u64>,
     top_n: Option<usize>,
+    json: bool,
     once: bool,
+    check_config: bool,
+    quiet: bool,
+    verbose: bool,
 }
 
 /// Result of parsing the arguments.
@@ -544,7 +688,10 @@ impl Cli {
 
             // Option value: the embedded one or the next argument.
             let value = |args: &mut dyn Iterator<Item = String>| -> Result<String, String> {
-                inline.clone().or_else(|| args.next()).ok_or_else(|| format!("option '{name}' requires a value"))
+                inline
+                    .clone()
+                    .or_else(|| args.next())
+                    .ok_or_else(|| format!("option '{name}' requires a value"))
             };
             let bad = |v: &str| format!("invalid value for '{name}': '{v}'");
 
@@ -552,6 +699,11 @@ impl Cli {
                 "-h" | "--help" => return Ok(Parsed::Help),
                 "-V" | "--version" => return Ok(Parsed::Version),
                 "-o" | "--once" => cli.once = true,
+                "-j" | "--json" => cli.json = true,
+                "-C" | "--check-config" => cli.check_config = true,
+                "-f" | "--foreground" => {}
+                "-q" | "--quiet" => cli.quiet = true,
+                "-v" | "--verbose" => cli.verbose = true,
                 "-c" | "--config" => cli.config = Some(value(&mut args)?),
                 "-d" | "--device" => cli.device = Some(value(&mut args)?),
                 "-t" | "--threshold" => {
@@ -579,18 +731,18 @@ impl Cli {
 }
 
 /// Builds the final configuration: defaults < file < command line, and
-/// resolves `device = auto`. Also used when reloading (SIGHUP).
-fn build_config(cli: &Cli) -> Result<Config, String> {
+/// resolves `device = auto`. Returns the configuration together with the
+/// warnings found while parsing the file. Also used when reloading (SIGHUP).
+fn load_config(cli: &Cli) -> Result<(Config, Vec<String>), String> {
     let mut cfg = Config::default();
+    let mut warnings = Vec::new();
 
     // With -c the file is mandatory; without it, use the default if it exists.
     let path = cli.config.as_deref().unwrap_or(DEFAULT_CONFIG);
     match fs::read_to_string(path) {
         Ok(text) => {
-            let (parsed, warnings) = Config::parse(&text);
-            for w in warnings {
-                eprintln!("iowatchd: configuration warning ({path}): {w}");
-            }
+            let (parsed, found) = Config::parse(&text);
+            warnings = found.into_iter().map(|w| format!("{path}: {w}")).collect();
             cfg = parsed;
         }
         Err(e) if cli.config.is_some() => {
@@ -611,16 +763,96 @@ fn build_config(cli: &Cli) -> Result<Config, String> {
     if let Some(n) = cli.top_n {
         cfg.top_n = n;
     }
+    if cli.json {
+        cfg.log_json = true;
+    }
     cfg.normalize();
 
     if cfg.device == "auto" {
-        cfg.device = detect_device()
-            .ok_or("could not detect the disk; use --device or set 'device' in the configuration")?;
+        cfg.device = detect_device().ok_or(
+            "could not detect the disk; use --device or set 'device' in the configuration",
+        )?;
     }
     if read_io_ticks(&cfg.device).is_none() {
-        return Err(format!("device '{}' not found in /proc/diskstats", cfg.device));
+        return Err(format!(
+            "device '{}' not found in /proc/diskstats",
+            cfg.device
+        ));
+    }
+    Ok((cfg, warnings))
+}
+
+/// Like [`load_config`], but prints the configuration warnings to stderr.
+fn build_config(cli: &Cli) -> Result<Config, String> {
+    let (cfg, warnings) = load_config(cli)?;
+    for w in warnings {
+        eprintln!("iowatchd: configuration warning: {w}");
     }
     Ok(cfg)
+}
+
+/// `--check-config`: validates the configuration and prints the effective
+/// values. Returns the process exit code (1 if there are errors or warnings).
+fn check_config(cli: &Cli) -> i32 {
+    match load_config(cli) {
+        Ok((cfg, warnings)) => {
+            for w in &warnings {
+                eprintln!("iowatchd: configuration warning: {w}");
+            }
+            println!("device={}", cfg.device);
+            println!("threshold={}", cfg.threshold);
+            println!("clear_threshold={}", cfg.clear_threshold);
+            println!("interval={}", cfg.interval);
+            println!("trigger_samples={}", cfg.trigger_samples);
+            println!("process_window={}", cfg.process_window);
+            println!("top_n={}", cfg.top_n);
+            println!("cooldown={}", cfg.cooldown);
+            match &cfg.log_file {
+                Some(p) => println!("log_file={}", p.display()),
+                None => println!("log_file="),
+            }
+            println!("log_max_mb={}", cfg.log_max_bytes / 1024 / 1024);
+            println!("log_format={}", if cfg.log_json { "json" } else { "text" });
+            if warnings.is_empty() {
+                println!("configuration OK");
+                0
+            } else {
+                1
+            }
+        }
+        Err(e) => {
+            eprintln!("iowatchd: error: {e}");
+            1
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// systemd notification
+// ---------------------------------------------------------------------------
+
+/// Sends a state message (e.g. `READY=1`) to systemd through `$NOTIFY_SOCKET`.
+/// It is a no-op when not started by systemd with `Type=notify`, and any
+/// failure is ignored on purpose: notification is best-effort.
+fn sd_notify(message: &str) {
+    use std::os::linux::net::SocketAddrExt;
+    use std::os::unix::net::{SocketAddr, UnixDatagram};
+
+    let Some(path) = std::env::var_os("NOTIFY_SOCKET") else {
+        return;
+    };
+    let Ok(sock) = UnixDatagram::unbound() else {
+        return;
+    };
+    let bytes = std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str());
+    let addr = match bytes.strip_prefix(b"@") {
+        // A leading '@' denotes a Linux abstract socket.
+        Some(name) => SocketAddr::from_abstract_name(name),
+        None => SocketAddr::from_pathname(&path),
+    };
+    if let Ok(addr) = addr {
+        let _ = sock.send_to_addr(message.as_bytes(), &addr);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -674,8 +906,13 @@ enum State {
 
 /// `--once` mode: measures for one interval, prints, and lists the processes
 /// if above the threshold. Does not write to the log file.
-fn run_once(cfg: &Config) {
-    let logger = Logger { file: None, max_bytes: 0 };
+fn run_once(cfg: &Config, cli: &Cli) {
+    let logger = Logger {
+        file: None,
+        max_bytes: 0,
+        json: cfg.log_json,
+        quiet: cli.quiet,
+    };
     let start_ticks = read_io_ticks(&cfg.device).unwrap_or(0);
     let start = Instant::now();
     nap(cfg.interval);
@@ -687,12 +924,21 @@ fn run_once(cfg: &Config) {
     if util >= cfg.threshold {
         report_top_processes(cfg, &logger, util);
     } else {
-        println!("IO={util:.0}% on {}", cfg.device);
+        logger.emit(
+            "sample",
+            &format!("IO={util:.0}% on {}", cfg.device),
+            &format!("\"device\":{},\"util\":{util:.0}", json_str(&cfg.device)),
+        );
     }
 }
 
-fn make_logger(cfg: &Config) -> Logger {
-    Logger { file: cfg.log_file.clone(), max_bytes: cfg.log_max_bytes }
+fn make_logger(cfg: &Config, cli: &Cli) -> Logger {
+    Logger {
+        file: cfg.log_file.clone(),
+        max_bytes: cfg.log_max_bytes,
+        json: cfg.log_json,
+        quiet: cli.quiet,
+    }
 }
 
 fn main() {
@@ -706,6 +952,10 @@ fn main() {
         }
     };
 
+    if cli.check_config {
+        std::process::exit(check_config(&cli));
+    }
+
     let mut cfg = build_config(&cli).unwrap_or_else(|e| {
         eprintln!("iowatchd: error: {e}");
         std::process::exit(1);
@@ -714,25 +964,33 @@ fn main() {
     install_signal_handlers();
 
     if cli.once {
-        run_once(&cfg);
+        run_once(&cfg, &cli);
         return;
     }
 
-    let mut logger = make_logger(&cfg);
+    let mut logger = make_logger(&cfg, &cli);
     let mut prev_ticks = read_io_ticks(&cfg.device).unwrap_or(0);
     let mut prev_time = Instant::now();
-    let mut state = State::Normal { consecutive_high: 0 };
+    let mut state = State::Normal {
+        consecutive_high: 0,
+    };
 
-    logger.log(&format!(
-        "started: device={} threshold={}% interval={}s",
-        cfg.device, cfg.threshold, cfg.interval
-    ));
+    logger.log(
+        "started",
+        &format!(
+            "started: device={} threshold={}% interval={}s",
+            cfg.device, cfg.threshold, cfg.interval
+        ),
+    );
+    // Tell systemd (Type=notify) that startup is complete.
+    sd_notify(&format!("READY=1\nSTATUS=monitoring {}", cfg.device));
 
     loop {
         nap(cfg.interval);
 
         if STOP.load(Ordering::SeqCst) {
-            logger.log("stopped");
+            sd_notify("STOPPING=1");
+            logger.log("stopped", "stopped");
             break;
         }
 
@@ -740,17 +998,26 @@ fn main() {
             match build_config(&cli) {
                 Ok(new) => {
                     cfg = new;
-                    logger = make_logger(&cfg);
+                    logger = make_logger(&cfg, &cli);
                     // The disk may have changed: reset the references and the state.
                     prev_ticks = read_io_ticks(&cfg.device).unwrap_or(0);
                     prev_time = Instant::now();
-                    state = State::Normal { consecutive_high: 0 };
-                    logger.log(&format!(
-                        "configuration reloaded: device={} threshold={}% interval={}s",
-                        cfg.device, cfg.threshold, cfg.interval
-                    ));
+                    state = State::Normal {
+                        consecutive_high: 0,
+                    };
+                    sd_notify(&format!("STATUS=monitoring {}", cfg.device));
+                    logger.log(
+                        "reloaded",
+                        &format!(
+                            "configuration reloaded: device={} threshold={}% interval={}s",
+                            cfg.device, cfg.threshold, cfg.interval
+                        ),
+                    );
                 }
-                Err(e) => logger.log(&format!("reload failed ({e}); keeping the current configuration")),
+                Err(e) => logger.log(
+                    "reload_failed",
+                    &format!("reload failed ({e}); keeping the current configuration"),
+                ),
             }
             continue;
         }
@@ -767,6 +1034,10 @@ fn main() {
         prev_ticks = ticks;
         prev_time = now;
 
+        if cli.verbose && !cli.quiet {
+            println!("sample: IO={util:.0}% on {}", cfg.device);
+        }
+
         state = match state {
             State::Normal { consecutive_high } => {
                 if util >= cfg.threshold {
@@ -777,25 +1048,39 @@ fn main() {
                         // reference for the next disk sample.
                         prev_ticks = read_io_ticks(&cfg.device).unwrap_or(prev_ticks);
                         prev_time = Instant::now();
-                        State::Alert { last_report: Instant::now() }
+                        State::Alert {
+                            last_report: Instant::now(),
+                        }
                     } else {
-                        State::Normal { consecutive_high: count }
+                        State::Normal {
+                            consecutive_high: count,
+                        }
                     }
                 } else {
-                    State::Normal { consecutive_high: 0 }
+                    State::Normal {
+                        consecutive_high: 0,
+                    }
                 }
             }
             State::Alert { last_report } => {
                 if util < cfg.clear_threshold {
-                    logger.log(&format!("IO back to normal: {util:.0}% on {}", cfg.device));
-                    State::Normal { consecutive_high: 0 }
+                    logger.emit(
+                        "normal",
+                        &format!("IO back to normal: {util:.0}% on {}", cfg.device),
+                        &format!("\"device\":{},\"util\":{util:.0}", json_str(&cfg.device)),
+                    );
+                    State::Normal {
+                        consecutive_high: 0,
+                    }
                 } else if util >= cfg.threshold
                     && last_report.elapsed() >= Duration::from_secs(cfg.cooldown)
                 {
                     report_top_processes(&cfg, &logger, util);
                     prev_ticks = read_io_ticks(&cfg.device).unwrap_or(prev_ticks);
                     prev_time = Instant::now();
-                    State::Alert { last_report: Instant::now() }
+                    State::Alert {
+                        last_report: Instant::now(),
+                    }
                 } else {
                     State::Alert { last_report }
                 }
@@ -818,11 +1103,37 @@ mod tests {
     }
 
     #[test]
+    fn json_strings_are_escaped() {
+        assert_eq!(json_str("a\"b\\c\nd\te"), "\"a\\\"b\\\\c\\nd\\te\"");
+        assert_eq!(json_str("\u{1}"), "\"\\u0001\"");
+    }
+
+    #[test]
+    fn config_reads_log_format() {
+        let (c, w) = Config::parse("log_format = json\nlog_max_mb = 0\n");
+        assert!(c.log_json && w.is_empty());
+        assert_eq!(c.log_max_bytes, 0);
+        let (c, w) = Config::parse("log_format = xml\n");
+        assert!(!c.log_json);
+        assert_eq!(w.len(), 1);
+    }
+
+    #[test]
+    fn cli_accepts_new_flags() {
+        let a = |v: &[&str]| Cli::parse(v.iter().map(|s| s.to_string()));
+        let Ok(Parsed::Run(c)) = a(&["-j", "-q", "-v", "-C", "-f"]) else {
+            panic!("parse failed")
+        };
+        assert!(c.json && c.quiet && c.verbose && c.check_config);
+    }
+
+    #[test]
     fn cli_accepts_long_short_and_equals_forms() {
         let a = |v: &[&str]| Cli::parse(v.iter().map(|s| s.to_string()));
         assert_eq!(a(&["-h"]), Ok(Parsed::Help));
         assert_eq!(a(&["--version"]), Ok(Parsed::Version));
-        let Ok(Parsed::Run(c)) = a(&["-d", "nvme0n1", "--threshold=60", "-i", "5", "--once"]) else {
+        let Ok(Parsed::Run(c)) = a(&["-d", "nvme0n1", "--threshold=60", "-i", "5", "--once"])
+        else {
             panic!("parse failed")
         };
         assert_eq!(c.device.as_deref(), Some("nvme0n1"));
@@ -848,8 +1159,14 @@ mod tests {
         let m = "22 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw\n\
                  30 22 0:25 / /tmp rw - tmpfs tmpfs rw\n\
                  40 22 0:40 /@ / rw - btrfs /dev/mapper/cryptroot rw\n";
-        assert_eq!(parse_root_source(m).as_deref(), Some("/dev/mapper/cryptroot"));
-        assert_eq!(parse_root_source("1 0 0:1 / / rw - overlay overlay rw\n"), None);
+        assert_eq!(
+            parse_root_source(m).as_deref(),
+            Some("/dev/mapper/cryptroot")
+        );
+        assert_eq!(
+            parse_root_source("1 0 0:1 / / rw - overlay overlay rw\n"),
+            None
+        );
     }
 
     #[test]
@@ -862,7 +1179,13 @@ mod tests {
     #[test]
     fn proc_io_reads_real_bytes() {
         let t = "rchar: 10\nwchar: 20\nread_bytes: 4096\nwrite_bytes: 8192\n";
-        assert_eq!(parse_proc_io(t), Some(ProcIo { read: 4096, write: 8192 }));
+        assert_eq!(
+            parse_proc_io(t),
+            Some(ProcIo {
+                read: 4096,
+                write: 8192
+            })
+        );
         assert_eq!(parse_proc_io("rchar: 1\n"), None);
     }
 
@@ -871,8 +1194,20 @@ mod tests {
         let before: HashMap<u32, ProcIo> = [(1, ProcIo { read: 0, write: 0 })].into();
         let after: HashMap<u32, ProcIo> = [
             (1, ProcIo { read: 0, write: 0 }),
-            (2, ProcIo { read: 100, write: 0 }),
-            (3, ProcIo { read: 0, write: 900 }),
+            (
+                2,
+                ProcIo {
+                    read: 100,
+                    write: 0,
+                },
+            ),
+            (
+                3,
+                ProcIo {
+                    read: 0,
+                    write: 900,
+                },
+            ),
         ]
         .into();
         let top = top_processes(&before, &after, 5);
@@ -882,7 +1217,9 @@ mod tests {
 
     #[test]
     fn config_applies_values_and_warns_about_errors() {
-        let (c, w) = Config::parse("device = nvme0n1\nthreshold=90 # x\ninterval = abc\nfoo = 1\nlog_file =\n");
+        let (c, w) = Config::parse(
+            "device = nvme0n1\nthreshold=90 # x\ninterval = abc\nfoo = 1\nlog_file =\n",
+        );
         assert_eq!(c.device, "nvme0n1");
         assert_eq!(c.threshold, 90.0);
         assert_eq!(c.interval, 2);

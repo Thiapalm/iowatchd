@@ -3,7 +3,8 @@ Description=iowatchd - disk IO usage monitor
 After=local-fs.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 ExecStart=/usr/local/bin/iowatchd -c /etc/iowatchd.conf
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure

@@ -1,0 +1,11 @@
+/var/log/iowatchd.log {
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    # iowatchd reopens the file on every write, so no signal is needed.
+    # Set log_max_mb = 0 in /etc/iowatchd.conf to rely on logrotate only.
+    copytruncate
+}

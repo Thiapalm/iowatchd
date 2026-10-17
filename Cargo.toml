@@ -1,6 +1,6 @@
 [package]
 name = "iowatchd"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Monitors disk IO usage and logs which processes are consuming it"
 license = "MIT"

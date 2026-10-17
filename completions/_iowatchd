@@ -1,0 +1,27 @@
+#compdef iowatchd iowatchd-log
+
+case $service in
+  iowatchd)
+    _arguments \
+      '(-c --config)'{-c,--config}'[configuration file]:file:_files' \
+      '(-d --device)'{-d,--device}'[disk to monitor]:disk:(auto ${(f)"$(awk "{print \$3}" /proc/diskstats 2>/dev/null)"})' \
+      '(-t --threshold)'{-t,--threshold}'[IO usage % that triggers an alert]:percent:' \
+      '(-i --interval)'{-i,--interval}'[seconds between samples]:seconds:' \
+      '(-n --top)'{-n,--top}'[processes listed per alert]:count:' \
+      '(-j --json)'{-j,--json}'[log one JSON object per line]' \
+      '(-o --once)'{-o,--once}'[take a single measurement and exit]' \
+      '(-C --check-config)'{-C,--check-config}'[validate the configuration and exit]' \
+      '(-f --foreground)'{-f,--foreground}'[run in the foreground]' \
+      '(-q --quiet)'{-q,--quiet}'[do not print to stdout]' \
+      '(-v --verbose)'{-v,--verbose}'[print every sample]' \
+      '(- *)'{-h,--help}'[show help]' \
+      '(- *)'{-V,--version}'[show version]'
+    ;;
+  iowatchd-log)
+    _arguments \
+      '-f[follow in real time]' \
+      '-s[show service status]' \
+      '(- *)'{-h,--help}'[show help]' \
+      '1:lines:'
+    ;;
+esac

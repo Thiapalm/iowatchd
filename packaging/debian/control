@@ -1,0 +1,16 @@
+Source: iowatchd
+Section: admin
+Priority: optional
+Maintainer: Thiapalm <thiago.palmieri@gmail.com>
+Build-Depends: debhelper-compat (= 13), cargo, make
+Standards-Version: 4.6.2
+Homepage: https://github.com/Thiapalm/iowatchd
+Rules-Requires-Root: no
+
+Package: iowatchd
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: lightweight disk IO monitor
+ iowatchd samples /proc/diskstats with minimal resources and, when disk
+ utilization exceeds a threshold, logs the processes doing the most IO to
+ the system journal and a log file.

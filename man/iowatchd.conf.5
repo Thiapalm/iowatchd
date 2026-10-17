@@ -1,0 +1,54 @@
+.TH IOWATCHD.CONF 5 "October 2026" "iowatchd 0.2.0" "File Formats"
+.SH NAME
+iowatchd.conf \- configuration file for iowatchd
+.SH DESCRIPTION
+\fI/etc/iowatchd.conf\fR is read by \fBiowatchd\fR(8). It consists of
+\fBkey = value\fR lines. Blank lines are ignored and \fB#\fR starts a comment.
+All keys are optional. Unknown keys and invalid values are reported as warnings
+(see \fBiowatchd \-\-check\-config\fR); an invalid value never replaces the
+default. Command-line options override the file. Send \fBSIGHUP\fR to reload.
+.SH KEYS
+.TP
+.B device
+Disk name as in \fI/proc/diskstats\fR (\fBsda\fR, \fBnvme0n1\fR). \fBauto\fR
+(default) selects the physical disk holding \fI/\fR.
+.TP
+.B threshold
+IO usage in % (1-100) that triggers a report. Default 80.
+.TP
+.B clear_threshold
+IO usage in % below which IO is considered normal again. Default 70.
+.TP
+.B interval
+Seconds between samples (>= 1). Default 2.
+.TP
+.B trigger_samples
+Consecutive samples at or above the threshold before the first report. Default 2.
+.TP
+.B process_window
+Seconds used to measure per-process IO. Default 1.
+.TP
+.B top_n
+Number of processes in each report. Default 5.
+.TP
+.B cooldown
+Minimum seconds between reports while IO stays high. Default 10.
+.TP
+.B log_file
+Log file path; empty disables file logging. Default \fI/var/log/iowatchd.log\fR.
+.TP
+.B log_max_mb
+Size in MB before rotating to \fI<file>.1\fR. \fB0\fR disables built-in
+rotation (use \fBlogrotate\fR(8)). Default 5.
+.TP
+.B log_format
+\fBtext\fR (default) or \fBjson\fR.
+.SH EXAMPLE
+.nf
+device = auto
+threshold = 90
+log_format = json
+.fi
+.SH SEE ALSO
+.BR iowatchd (8),
+.BR iowatchd-log (1)
