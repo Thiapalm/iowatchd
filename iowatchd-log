@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Mostra os alertas do iowatchd.
+#   iowatchd-log          ultimos alertas (padrao: 50 linhas)
+#   iowatchd-log -f       acompanha em tempo real
+#   iowatchd-log -s       status do servico
+#   iowatchd-log -h       ajuda
+LOG=/var/log/iowatchd.log
+
+case "${1:-}" in
+  -f) exec tail -n 20 -F "$LOG" ;;
+  -s) if [ -d /run/systemd/system ]; then exec systemctl status iowatchd --no-pager
+      elif command -v rc-service >/dev/null 2>&1; then exec rc-service iowatchd status
+      else exec sv status iowatchd; fi ;;
+  -h|--help) sed -n '2,6p' "$0" ;;
+  *)  tail -n "${1:-50}" "$LOG" ;;
+esac

@@ -1,0 +1,85 @@
+.TH IOWATCHD 8 "outubro 2026" "iowatchd 0.1.0" "Comandos de administracao"
+.SH NOME
+iowatchd \- monitora o uso de IO do disco e registra quais processos o consomem
+.SH SINOPSE
+.B iowatchd
+[\fIOPCOES\fR]
+.SH DESCRICAO
+.B iowatchd
+mede periodicamente a utilizacao de IO de um disco (campo \fBio_ticks\fR de
+\fI/proc/diskstats\fR, equivalente ao \fB%util\fR do \fBiostat\fR(1)). Quando a
+utilizacao fica acima do limite configurado, mede o IO de cada processo
+(\fI/proc/<pid>/io\fR) e registra os que mais leem e escrevem, com nome, PID,
+usuario, taxas e linha de comando.
+.PP
+O registro vai para a saida padrao (capturada pelo journald) e para um arquivo
+de log com rotacao simples. Para enxergar todos os processos e necessario
+executar como root.
+.SH OPCOES
+.TP
+\fB\-c\fR, \fB\-\-config\fR \fIARQUIVO\fR
+Arquivo de configuracao. Padrao: \fI/etc/iowatchd.conf\fR, se existir.
+.TP
+\fB\-d\fR, \fB\-\-device\fR \fIDISCO\fR
+Disco a monitorar (\fBsda\fR, \fBnvme0n1\fR...). Padrao \fBauto\fR: disco fisico
+que contem a particao raiz.
+.TP
+\fB\-t\fR, \fB\-\-threshold\fR \fIPCT\fR
+Limite de uso de IO, em %, que dispara o registro (1 a 100). Padrao 80.
+.TP
+\fB\-i\fR, \fB\-\-interval\fR \fISEG\fR
+Segundos entre amostras (minimo 1). Padrao 2.
+.TP
+\fB\-n\fR, \fB\-\-top\fR \fIN\fR
+Numero de processos listados em cada registro. Padrao 5.
+.TP
+\fB\-o\fR, \fB\-\-once\fR
+Faz uma unica medicao, imprime o resultado na saida padrao e termina.
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Mostra a ajuda e termina.
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Mostra a versao e termina.
+.PP
+As opcoes de linha de comando tem prioridade sobre o arquivo de configuracao.
+.SH CONFIGURACAO
+Arquivo de linhas \fBchave = valor\fR; \fB#\fR inicia comentario. Chaves:
+\fBdevice\fR, \fBthreshold\fR, \fBclear_threshold\fR, \fBinterval\fR,
+\fBtrigger_samples\fR, \fBprocess_window\fR, \fBtop_n\fR, \fBcooldown\fR,
+\fBlog_file\fR e \fBlog_max_mb\fR. Veja os comentarios em \fI/etc/iowatchd.conf\fR.
+.SH SINAIS
+.TP
+.B SIGHUP
+Recarrega a configuracao sem reiniciar. Se a nova configuracao for invalida,
+mantem a atual.
+.TP
+.BR SIGTERM ", " SIGINT
+Encerra de forma limpa.
+.SH "CODIGOS DE SAIDA"
+.TP
+.B 0
+Sucesso.
+.TP
+.B 1
+Erro de execucao (configuracao ilegivel, disco inexistente).
+.TP
+.B 2
+Erro de uso (opcao invalida).
+.SH ARQUIVOS
+.TP
+.I /etc/iowatchd.conf
+Configuracao.
+.TP
+.I /var/log/iowatchd.log
+Log de alertas.
+.SH EXEMPLOS
+.nf
+iowatchd \-\-once
+iowatchd \-d nvme0n1 \-t 60 \-\-once
+journalctl \-u iowatchd \-f
+.fi
+.SH "VEJA TAMBEM"
+.BR iowatchd-log (1),
+.BR iostat (1),
+.BR iotop (8)

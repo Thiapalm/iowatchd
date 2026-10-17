@@ -1,0 +1,23 @@
+.TH IOWATCHD-LOG 1 "outubro 2026" "iowatchd 0.1.0" "Comandos do usuario"
+.SH NOME
+iowatchd-log \- mostra os alertas registrados pelo iowatchd
+.SH SINOPSE
+.B iowatchd-log
+[\fIN\fR | \fB\-f\fR | \fB\-s\fR | \fB\-h\fR]
+.SH DESCRICAO
+Atalho para consultar \fI/var/log/iowatchd.log\fR e o estado do servico.
+.SH OPCOES
+.TP
+.I N
+Mostra as ultimas \fIN\fR linhas (padrao 50).
+.TP
+.B \-f
+Acompanha o log em tempo real.
+.TP
+.B \-s
+Mostra o status do servico (systemd, OpenRC ou runit).
+.TP
+.B \-h
+Mostra a ajuda.
+.SH "VEJA TAMBEM"
+.BR iowatchd (8)

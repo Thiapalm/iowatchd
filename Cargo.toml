@@ -1,0 +1,14 @@
+[package]
+name = "iowatchd"
+version = "0.1.0"
+edition = "2021"
+description = "Monitora o uso de IO do disco e registra quais processos o estao consumindo"
+
+# Sem dependencias externas: binario pequeno, compilacao offline e baixo consumo.
+
+[profile.release]
+opt-level = "s"     # prioriza tamanho
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

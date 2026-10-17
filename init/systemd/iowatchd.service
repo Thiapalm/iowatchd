@@ -1,0 +1,34 @@
+[Unit]
+Description=iowatchd - monitor de uso de IO do disco
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/iowatchd -c /etc/iowatchd.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+# Roda como root para ler /proc/<pid>/io de todos os processos,
+# mas com privilegios e recursos reduzidos ao minimo.
+Nice=19
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle
+CPUQuota=5%
+MemoryMax=20M
+TasksMax=4
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log
+CapabilityBoundingSet=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
