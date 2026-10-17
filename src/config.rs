@@ -1,0 +1,165 @@
+//! Monitor configuration: defaults and the `key = value` file parser.
+
+use std::path::PathBuf;
+
+/// Monitor parameters. Defaults are in [`Config::default`]; they can be
+/// overridden by a `key = value` file (see `config.conf`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Config {
+    /// Device name in `/proc/diskstats` (e.g. `sda`, `nvme0n1`) or `auto`
+    /// to detect the physical disk that holds the root partition.
+    pub device: String,
+    /// IO utilization (%) at or above which processes are logged.
+    pub threshold: f64,
+    /// IO utilization (%) below which IO is considered back to normal.
+    /// Keeping it below `threshold` avoids flapping between states.
+    pub clear_threshold: f64,
+    /// Seconds between disk samples.
+    pub interval: u64,
+    /// Consecutive samples above the threshold required to trigger.
+    pub trigger_samples: u32,
+    /// Window (s) used to measure per-process IO once triggered.
+    pub process_window: u64,
+    /// How many processes to list per report.
+    pub top_n: usize,
+    /// Minimum interval (s) between reports while IO stays high.
+    pub cooldown: u64,
+    /// Log file in addition to stdout/journald (`None` disables it).
+    pub log_file: Option<PathBuf>,
+    /// Maximum log file size (bytes) before rotating; 0 disables the built-in
+    /// rotation (useful when logrotate manages the file).
+    pub log_max_bytes: u64,
+    /// Log format: plain text or one JSON object per line.
+    pub log_json: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            device: "auto".into(),
+            threshold: 80.0,
+            clear_threshold: 70.0,
+            interval: 2,
+            trigger_samples: 2,
+            process_window: 1,
+            top_n: 5,
+            cooldown: 10,
+            log_file: Some(PathBuf::from("/var/log/iowatchd.log")),
+            log_max_bytes: 5 * 1024 * 1024,
+            log_json: false,
+        }
+    }
+}
+
+impl Config {
+    /// Applies the contents of a configuration file on top of the defaults.
+    /// Invalid lines are ignored and returned as warnings.
+    pub fn parse(text: &str) -> (Config, Vec<String>) {
+        let mut cfg = Config::default();
+        let mut warnings = Vec::new();
+
+        for (n, raw) in text.lines().enumerate() {
+            // Strip comments and whitespace.
+            let line = raw.split('#').next().unwrap_or("").trim();
+            if line.is_empty() {
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                warnings.push(format!("line {}: expected 'key = value'", n + 1));
+                continue;
+            };
+            let (key, value) = (key.trim(), value.trim());
+
+            let ok = match key {
+                "device" => {
+                    cfg.device = value.to_string();
+                    !value.is_empty()
+                }
+                "threshold" => value.parse().map(|v| cfg.threshold = v).is_ok(),
+                "clear_threshold" => value.parse().map(|v| cfg.clear_threshold = v).is_ok(),
+                "interval" => value.parse().map(|v| cfg.interval = v).is_ok(),
+                "trigger_samples" => value.parse().map(|v| cfg.trigger_samples = v).is_ok(),
+                "process_window" => value.parse().map(|v| cfg.process_window = v).is_ok(),
+                "top_n" => value.parse().map(|v| cfg.top_n = v).is_ok(),
+                "cooldown" => value.parse().map(|v| cfg.cooldown = v).is_ok(),
+                "log_file" => {
+                    cfg.log_file = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.into())
+                    };
+                    true
+                }
+                "log_max_mb" => value
+                    .parse::<u64>()
+                    .map(|v| cfg.log_max_bytes = v * 1024 * 1024)
+                    .is_ok(),
+                "log_format" => match value {
+                    "text" => {
+                        cfg.log_json = false;
+                        true
+                    }
+                    "json" => {
+                        cfg.log_json = true;
+                        true
+                    }
+                    _ => false,
+                },
+                _ => {
+                    warnings.push(format!("line {}: unknown key '{}'", n + 1, key));
+                    true
+                }
+            };
+            if !ok {
+                warnings.push(format!("line {}: invalid value for '{}'", n + 1, key));
+            }
+        }
+
+        cfg.normalize();
+        (cfg, warnings)
+    }
+
+    /// Enforces safe values (avoids a loop without sleeping or inverted hysteresis).
+    pub fn normalize(&mut self) {
+        self.interval = self.interval.max(1);
+        self.process_window = self.process_window.max(1);
+        self.trigger_samples = self.trigger_samples.max(1);
+        if self.clear_threshold > self.threshold {
+            self.clear_threshold = self.threshold;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_log_format() {
+        let (c, w) = Config::parse("log_format = json\nlog_max_mb = 0\n");
+        assert!(c.log_json && w.is_empty());
+        assert_eq!(c.log_max_bytes, 0);
+        let (c, w) = Config::parse("log_format = xml\n");
+        assert!(!c.log_json);
+        assert_eq!(w.len(), 1);
+    }
+
+    #[test]
+    fn applies_values_and_warns_about_errors() {
+        let (c, w) = Config::parse(
+            "device = nvme0n1\nthreshold=90 # x\ninterval = abc\nfoo = 1\nlog_file =\n",
+        );
+        assert_eq!(c.device, "nvme0n1");
+        assert_eq!(c.threshold, 90.0);
+        assert_eq!(c.interval, 2);
+        assert!(c.log_file.is_none());
+        assert_eq!(w.len(), 2);
+    }
+
+    #[test]
+    fn fixes_inverted_hysteresis() {
+        let (c, _) = Config::parse("threshold = 50\nclear_threshold = 70\ninterval = 0\n");
+        assert_eq!(c.clear_threshold, 50.0);
+        assert_eq!(c.interval, 1);
+    }
+}
