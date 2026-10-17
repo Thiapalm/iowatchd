@@ -28,8 +28,10 @@ jobs:
           name="iowatchd-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}"
           mkdir "$name"
           cp target/${{ matrix.target }}/release/iowatchd "$name/"
-          cp -r iowatchd-log iowatchd-notify man completions init packaging/logrotate config.conf \
+          cp -r iowatchd-log iowatchd-notify man completions init config.conf \
             Makefile LICENSE README.md CHANGELOG.md "$name/"
+          mkdir -p "$name/packaging"
+          cp -r packaging/logrotate "$name/packaging/"
           tar czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
       - uses: actions/upload-artifact@v4

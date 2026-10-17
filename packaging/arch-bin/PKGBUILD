@@ -1,0 +1,26 @@
+# Maintainer: Thiapalm <thiago.palmieri@gmail.com>
+# Prebuilt (static musl) variant: installs the release binary, no Rust needed.
+pkgname=iowatchd-bin
+_name=iowatchd
+pkgver=0.4.1
+pkgrel=1
+pkgdesc='Lightweight disk IO monitor that logs which processes cause high IO (prebuilt binary)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/Thiapalm/iowatchd'
+license=('MIT')
+provides=("$_name")
+conflicts=("$_name")
+backup=('etc/iowatchd.conf')
+_base="$url/releases/download/v$pkgver/$_name-v$pkgver-linux"
+source_x86_64=("$_base-x86_64.tar.gz")
+source_aarch64=("$_base-aarch64.tar.gz")
+sha256sums_x86_64=('5cd8d603b5c515ca123cfddfe7ffa340a212fd23534130f89f6fd378747269bf')
+sha256sums_aarch64=('b8e7c499c5663dcb6d5faf6cd18802c3c55b8d2946565c380678cff8d05e79b5')
+
+package() {
+  cd "$_name-v$pkgver-linux-$CARCH"
+  # 0.4.1 tarballs ship logrotate/ at the top level; the Makefile expects packaging/logrotate
+  [ -e packaging/logrotate ] || { mkdir packaging && cp -r logrotate packaging/; }
+  make install BIN=iowatchd DESTDIR="$pkgdir" PREFIX=/usr \
+    SYSTEMDUNITDIR=/usr/lib/systemd/system
+}

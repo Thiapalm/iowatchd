@@ -20,7 +20,9 @@ Or with make (`PREFIX`, `DESTDIR`, `SYSTEMDUNITDIR` are honoured):
 
     make && sudo make install
 
-Packaging recipes are in `packaging/`: Arch (`PKGBUILD`), RPM (`iowatchd.spec`) and Debian (`debian/`; copy it to the source root and run `dpkg-buildpackage -us -uc`). The RPM and Debian recipes are untested.
+Prebuilt static binaries are on the GitHub releases page; `cargo install iowatchd` builds from crates.io, and `cargo binstall iowatchd` downloads the prebuilt binary (from 0.4.2).
+
+Packaging recipes are in `packaging/`: Arch (`PKGBUILD`, and `arch-bin/` for the prebuilt variant), Homebrew (`homebrew/iowatchd.rb`, for a personal tap), RPM (`iowatchd.spec`) and Debian (`debian/`; copy it to the source root and run `dpkg-buildpackage -us -uc`). The RPM and Debian recipes are untested.
 
 If the old installation (`ssd-io-monitor`) exists, `install.sh` removes it. Man pages (`iowatchd(8)`, `iowatchd.conf(5)`, `iowatchd-log(1)`), bash/zsh/fish completions and a logrotate file are installed too.
 

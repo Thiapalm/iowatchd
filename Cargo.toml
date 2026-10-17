@@ -20,3 +20,10 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# cargo-binstall: download the prebuilt static binary from the GitHub release
+# instead of compiling. Install with `cargo binstall iowatchd`.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/iowatchd-v{ version }-linux-{ target-arch }.tar.gz"
+bin-dir = "iowatchd-v{ version }-linux-{ target-arch }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
