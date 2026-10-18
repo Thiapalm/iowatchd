@@ -85,4 +85,27 @@ mod tests {
         let _ = std::fs::remove_file(&out);
         assert_eq!(text.trim(), "alert sda 97 hello world");
     }
+
+    fn ev() -> HookEvent<'static> {
+        HookEvent {
+            event: "normal",
+            device: "sda",
+            util: 5.0,
+            message: "ok",
+        }
+    }
+
+    #[test]
+    fn failing_and_missing_commands_do_not_panic() {
+        run_hook("exit 3", &ev());
+        run_hook("this-command-does-not-exist-iowatchd", &ev());
+        run_hook("", &ev());
+    }
+
+    #[test]
+    fn hook_does_not_block_the_caller() {
+        let start = Instant::now();
+        run_hook("sleep 5", &ev());
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
 }

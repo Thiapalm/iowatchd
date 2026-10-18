@@ -306,3 +306,99 @@ fn once_shows_disk_details() {
     assert_eq!(code, 0);
     assert!(out.contains("queue="), "{out}");
 }
+
+#[test]
+fn sighup_reloads_the_configuration() {
+    let Some(dev) = any_device() else { return };
+    let dir = std::env::temp_dir().join(format!("iowatchd-hup-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let conf = dir.join("t.conf");
+    std::fs::write(&conf, format!("device = {dev}\nlog_file =\ninterval = 1\n")).unwrap();
+
+    let mut child = Command::new(BIN)
+        .args(["-c", conf.to_str().unwrap()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    std::fs::write(
+        &conf,
+        format!("device = {dev}\nlog_file =\ninterval = 1\nthreshold = 55\n"),
+    )
+    .unwrap();
+    send_signal(child.id(), "HUP");
+    std::thread::sleep(Duration::from_millis(1800));
+    // A broken device must keep the daemon alive with the previous settings.
+    std::fs::write(&conf, "interval = 1\nthreshold = 55\nlog_file =\n\x00bad").unwrap();
+    send_signal(child.id(), "HUP");
+    std::thread::sleep(Duration::from_millis(1500));
+    send_signal(child.id(), "TERM");
+
+    let mut out = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut out)
+        .unwrap();
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+    assert!(
+        out.contains("configuration reloaded") && out.contains("threshold=55%"),
+        "{out}"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn alert_runs_hook_and_is_readable_by_report() {
+    let Some(dev) = any_device() else { return };
+    let dir = std::env::temp_dir().join(format!("iowatchd-alert-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("io.log");
+    let hook_out = dir.join("hook.txt");
+    let conf = dir.join("t.conf");
+    // threshold = 0 makes the first sample an alert regardless of disk load.
+    std::fs::write(
+        &conf,
+        format!(
+            "device = {dev}\ninterval = 1\nthreshold = 0\ntrigger_samples = 1\nprocess_window = 1\nlog_file = {}\nnotify_command = echo \"$IOWATCHD_EVENT $IOWATCHD_DEVICE\" >> {}\n",
+            log.display(),
+            hook_out.display()
+        ),
+    )
+    .unwrap();
+    let c = conf.to_str().unwrap();
+
+    let mut child = Command::new(BIN)
+        .args(["-c", c, "-q"])
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    while !hook_out.exists() && start.elapsed() < Duration::from_secs(8) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    send_signal(child.id(), "TERM");
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+
+    let hook = std::fs::read_to_string(&hook_out).unwrap_or_default();
+    assert!(hook.starts_with(&format!("alert {dev}")), "{hook}");
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert!(text.contains("ALERT IO="), "{text}");
+
+    let (code, out, _) = run(&["-c", c, "--report", "--since", "1h"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("alerts: 1"), "{out}");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn invalid_option_values_exit_two() {
+    for args in [["--interval", "abc"], ["--threshold", "x"]] {
+        let (code, _, err) = run(&args);
+        assert_eq!(code, 2, "{args:?}: {err}");
+    }
+}

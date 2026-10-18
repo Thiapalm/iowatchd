@@ -32,6 +32,8 @@ jobs:
           sudo apt-get install -y zsh shellcheck >/dev/null
           zsh -n completions/_iowatchd
           shellcheck -S warning iowatchd-log iowatchd-notify scripts/*.sh
+          sh -n init/runit/run init/openrc/iowatchd
+          shellcheck -S warning -s sh init/runit/run
       - name: Release versions are consistent
         run: scripts/check-versions.sh
       - name: Logrotate config and systemd unit
@@ -84,7 +86,7 @@ jobs:
           dnf install -y ~/rpmbuild/RPMS/*/iowatchd-*.rpm rpmlint
           iowatchd --version
           test -f /etc/iowatchd.conf
-          rpmlint ~/rpmbuild/RPMS/*/iowatchd-*.rpm || true
+          rpmlint ~/rpmbuild/RPMS/*/iowatchd-*.rpm
 
   tarball:
     strategy:

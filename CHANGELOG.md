@@ -8,6 +8,7 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - CI now builds and tests every package: Arch (`PKGBUILD` and `-bin`), Homebrew formula, `.deb`/`.rpm` install and lint, static musl tarballs (x86_64 and aarch64), logrotate and systemd unit checks.
+- More unit and integration tests: alert state machine (extracted into a pure `advance` function), logger rotation/formats, hook, `sd_notify`, config clamping, alert/report round trip and `SIGHUP` reload.
 - `scripts/check-versions.sh` verifies that all release files agree on the version (and the tag, in the release workflow).
 
 ## [0.5.1] - 2026-10-17

@@ -410,4 +410,78 @@ mod tests {
         assert_eq!(top.iter().map(|u| u.pid).collect::<Vec<_>>(), vec![3, 2]);
         assert_eq!(top_processes(&before, &after, 1).len(), 1);
     }
+
+    fn metrics(await_ms: Option<f64>) -> Metrics {
+        Metrics {
+            util: 90.0,
+            await_ms,
+            queue_depth: 1.54,
+            read_bytes_per_s: 0.0,
+            write_bytes_per_s: 48.0 * 1024.0,
+        }
+    }
+
+    #[test]
+    fn rates_are_human_readable() {
+        assert_eq!(human_rate(0.0), "0KB/s");
+        assert_eq!(human_rate(2048.0), "2KB/s");
+        assert_eq!(human_rate(1024.0 * 1024.0), "1.0MB/s");
+        assert_eq!(human_rate(5.5 * 1024.0 * 1024.0), "5.5MB/s");
+    }
+
+    #[test]
+    fn units_are_shortened() {
+        assert_eq!(shorten_unit("cron.service"), "cron");
+        assert_eq!(shorten_unit("session-3.scope"), "session-3");
+        assert_eq!(shorten_unit("plain"), "plain");
+        let id = "0123456789abcdef".repeat(4);
+        assert_eq!(
+            shorten_unit(&format!("docker-{id}.scope")),
+            "docker-0123456789ab"
+        );
+    }
+
+    // `--report` re-parses this header, so the format must stay stable.
+    #[test]
+    fn alert_header_format_is_stable() {
+        let psi = Pressure {
+            some_avg10: 3.25,
+            full_avg10: 1.0,
+        };
+        assert_eq!(
+            metrics_text(&metrics(Some(12.34)), Some(psi)),
+            " (await=12.3ms queue=1.5 read=0KB/s write=48KB/s psi=3.2%)"
+        );
+        assert_eq!(
+            metrics_text(&metrics(None), None),
+            " (queue=1.5 read=0KB/s write=48KB/s)"
+        );
+    }
+
+    #[test]
+    fn json_metrics_are_optional_members() {
+        let full = metrics_json(
+            &metrics(Some(12.34)),
+            Some(Pressure {
+                some_avg10: 3.25,
+                full_avg10: 1.0,
+            }),
+        );
+        assert!(full.contains("\"await_ms\":12.34"));
+        assert!(full.contains("\"psi_some_avg10\":3.25,\"psi_full_avg10\":1.00"));
+        let bare = metrics_json(&metrics(None), None);
+        assert!(!bare.contains("await_ms") && !bare.contains("psi"));
+        assert!(bare.contains("\"disk_write_bytes_per_s\":49152"));
+    }
+
+    #[test]
+    fn users_are_read_from_passwd_format() {
+        let users = load_users();
+        assert_eq!(users.get(&0).map(String::as_str), Some("root"));
+    }
+
+    #[test]
+    fn own_process_has_a_name() {
+        assert!(!process_name(std::process::id()).is_empty());
+    }
 }

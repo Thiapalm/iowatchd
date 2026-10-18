@@ -644,4 +644,18 @@ mod tests {
         assert_eq!((f[1].id, f[1].raw), (197, 2));
         assert!(smart_lines(&Smart::Findings(f))[0].contains("sector problems"));
     }
+
+    #[test]
+    fn rates_are_converted_to_bytes() {
+        assert_eq!(parse_rate("56KB/s"), 56.0 * 1024.0);
+        assert_eq!(parse_rate("1.5MB/s"), 1.5 * 1024.0 * 1024.0);
+        assert_eq!(parse_rate("garbage"), 0.0);
+    }
+
+    #[test]
+    fn malformed_lines_are_not_alerts() {
+        assert!(parse_hit("no separator here").is_none());
+        assert!(parse_alert("random text").is_none());
+        assert!(parse_alert("").is_none());
+    }
 }
