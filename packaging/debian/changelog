@@ -1,3 +1,9 @@
+iowatchd (0.5.2-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Thiapalm <thiago.palmieri@gmail.com>  Sun, 18 Oct 2026 16:30:00 -0300
+
 iowatchd (0.5.1-1) unstable; urgency=medium
 
   * New upstream release.

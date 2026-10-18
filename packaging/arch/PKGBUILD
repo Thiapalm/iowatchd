@@ -1,6 +1,6 @@
 # Maintainer: Thiapalm <thiago.palmieri@gmail.com>
 pkgname=iowatchd
-pkgver=0.5.1
+pkgver=0.5.2
 pkgrel=1
 pkgdesc='Lightweight disk IO monitor that logs which processes cause high IO'
 arch=('x86_64' 'aarch64')

@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-18
+
 ### Added
 - Man page `iowatchd-notify(1)`.
 
