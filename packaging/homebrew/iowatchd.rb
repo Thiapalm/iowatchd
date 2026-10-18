@@ -5,17 +5,17 @@
 class Iowatchd < Formula
   desc "Lightweight disk IO monitor that logs which processes cause high IO"
   homepage "https://github.com/Thiapalm/iowatchd"
-  version "0.4.2"
+  version "0.5.0"
   license "MIT"
 
   on_linux do
     on_intel do
-      url "https://github.com/Thiapalm/iowatchd/releases/download/v0.4.2/iowatchd-v0.4.2-linux-x86_64.tar.gz"
-      sha256 "17b481ca72a500c3f813ebe5f7fca6c20b71ea6390550ef014efa71e229b0322"
+      url "https://github.com/Thiapalm/iowatchd/releases/download/v0.5.0/iowatchd-v0.5.0-linux-x86_64.tar.gz"
+      sha256 "06fea295f7f5ae6164b751241072155bfcfb202712ad6e69ebb3b9ad44b40d32"
     end
     on_arm do
-      url "https://github.com/Thiapalm/iowatchd/releases/download/v0.4.2/iowatchd-v0.4.2-linux-aarch64.tar.gz"
-      sha256 "5b972972248c36e782d680fa77169fe4b485fc6fbd20b99f56bffb73eb8ae025"
+      url "https://github.com/Thiapalm/iowatchd/releases/download/v0.5.0/iowatchd-v0.5.0-linux-aarch64.tar.gz"
+      sha256 "0985f3330374023a3cf87f3a3f7e0ab29be0ac87b690cc7771ca94843a450c84"
     end
   end
 

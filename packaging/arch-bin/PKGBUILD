@@ -2,7 +2,7 @@
 # Prebuilt (static musl) variant: installs the release binary, no Rust needed.
 pkgname=iowatchd-bin
 _name=iowatchd
-pkgver=0.4.2
+pkgver=0.5.0
 pkgrel=1
 pkgdesc='Lightweight disk IO monitor that logs which processes cause high IO (prebuilt binary)'
 arch=('x86_64' 'aarch64')
@@ -14,8 +14,8 @@ backup=('etc/iowatchd.conf')
 _base="$url/releases/download/v$pkgver/$_name-v$pkgver-linux"
 source_x86_64=("$_base-x86_64.tar.gz")
 source_aarch64=("$_base-aarch64.tar.gz")
-sha256sums_x86_64=('17b481ca72a500c3f813ebe5f7fca6c20b71ea6390550ef014efa71e229b0322')
-sha256sums_aarch64=('5b972972248c36e782d680fa77169fe4b485fc6fbd20b99f56bffb73eb8ae025')
+sha256sums_x86_64=('06fea295f7f5ae6164b751241072155bfcfb202712ad6e69ebb3b9ad44b40d32')
+sha256sums_aarch64=('0985f3330374023a3cf87f3a3f7e0ab29be0ac87b690cc7771ca94843a450c84')
 
 package() {
   cd "$_name-v$pkgver-linux-$CARCH"
