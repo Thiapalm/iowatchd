@@ -9,6 +9,7 @@ URL:            https://github.com/Thiapalm/iowatchd
 Source0:        %{url}/archive/refs/tags/v%{version}.tar.gz#/%{name}-%{version}.tar.gz
 BuildRequires:  cargo
 BuildRequires:  make
+Requires:       logrotate
 BuildRequires:  systemd-rpm-macros
 %{?systemd_requires}
 
@@ -45,6 +46,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix} \
 %{_bindir}/iowatchd-notify
 %{_unitdir}/iowatchd.service
 %{_mandir}/man1/iowatchd-log.1*
+%{_mandir}/man1/iowatchd-notify.1*
 %{_mandir}/man5/iowatchd.conf.5*
 %{_mandir}/man8/iowatchd.8*
 %{_datadir}/bash-completion/completions/iowatchd

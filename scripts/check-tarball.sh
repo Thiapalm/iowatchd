@@ -9,7 +9,7 @@ tar xzf "$tarball" -C "$work"
 cd "$work"/*/
 
 for f in iowatchd iowatchd-log iowatchd-notify man/iowatchd.8 man/iowatchd.conf.5 \
-  man/iowatchd-log.1 completions/iowatchd.bash completions/_iowatchd \
+  man/iowatchd-log.1 man/iowatchd-notify.1 completions/iowatchd.bash completions/_iowatchd \
   completions/iowatchd.fish init/systemd/iowatchd.service config.conf Makefile \
   LICENSE packaging/logrotate/iowatchd; do
   test -e "$f" || { echo "missing in tarball: $f" >&2; exit 1; }

@@ -1,0 +1,26 @@
+.TH IOWATCHD-NOTIFY 1 "October 2026" "iowatchd 0.5.1" "User Commands"
+.SH NAME
+iowatchd-notify \- desktop pop-up for iowatchd alerts
+.SH SYNOPSIS
+.B iowatchd-notify
+.SH DESCRIPTION
+Helper meant to be used as the \fBnotify_command\fR of \fBiowatchd\fR(8). It
+shows a desktop pop-up with \fBnotify-send\fR(1) on the session bus of every
+logged-in user, since iowatchd runs as root and has no desktop session itself.
+It exits silently if \fBnotify-send\fR is not installed.
+.PP
+Alert pop-ups are limited to one per minute; recovery pop-ups are always
+shown. The script reads the \fBIOWATCHD_*\fR variables set by iowatchd
+(for example \fBIOWATCHD_EVENT\fR, \fBIOWATCHD_DEVICE\fR, \fBIOWATCHD_UTIL\fR
+and \fBIOWATCHD_MESSAGE\fR).
+.SH EXAMPLE
+In \fI/etc/iowatchd.conf\fR:
+.PP
+.RS
+notify_command = iowatchd-notify
+.RE
+.PP
+then reload the service with \fBsystemctl reload iowatchd\fR.
+.SH SEE ALSO
+.BR iowatchd (8),
+.BR iowatchd.conf (5)

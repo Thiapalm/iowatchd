@@ -24,7 +24,7 @@ Prebuilt static binaries are on the GitHub releases page; `cargo install iowatch
 
 Packaging recipes are in `packaging/`: Arch (`PKGBUILD`, and `arch-bin/` for the prebuilt variant), Homebrew (`homebrew/iowatchd.rb`, for a personal tap), RPM (`iowatchd.spec`) and Debian (`debian/`; copy it to the source root and run `dpkg-buildpackage -us -uc`). The RPM and Debian recipes are untested.
 
-If the old installation (`ssd-io-monitor`) exists, `install.sh` removes it. Man pages (`iowatchd(8)`, `iowatchd.conf(5)`, `iowatchd-log(1)`), bash/zsh/fish completions and a logrotate file are installed too.
+If the old installation (`ssd-io-monitor`) exists, `install.sh` removes it. Man pages (`iowatchd(8)`, `iowatchd.conf(5)`, `iowatchd-log(1)`, `iowatchd-notify(1)`), bash/zsh/fish completions and a logrotate file are installed too.
 
 ## Usage
 

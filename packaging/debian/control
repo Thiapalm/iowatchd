@@ -10,6 +10,7 @@ Rules-Requires-Root: no
 Package: iowatchd
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: logrotate
 Description: lightweight disk IO monitor
  iowatchd samples /proc/diskstats with minimal resources and, when disk
  utilization exceeds a threshold, logs the processes doing the most IO to
