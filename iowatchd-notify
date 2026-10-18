@@ -13,7 +13,7 @@ command -v notify-send >/dev/null 2>&1 || exit 0
 
 # Alerts repeat while IO stays high: show at most one pop-up per minute.
 # Recovery pop-ups are always shown.
-STAMP=/run/iowatchd-notify.stamp
+STAMP=${RUNTIME_DIRECTORY:-/run}/iowatchd-notify.stamp
 if [ "$IOWATCHD_EVENT" = alert ]; then
     now=$(date +%s)
     last=$(cat "$STAMP" 2>/dev/null || echo 0)

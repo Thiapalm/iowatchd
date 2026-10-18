@@ -17,14 +17,17 @@ IOSchedulingClass=idle
 CPUSchedulingPolicy=idle
 CPUQuota=5%
 MemoryMax=20M
-TasksMax=4
+TasksMax=32
 
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
+# read-only (not true): notify_command must reach /run/user/<uid>/bus to show pop-ups.
+ProtectHome=read-only
+RuntimeDirectory=iowatchd
 PrivateTmp=true
 ReadWritePaths=/var/log
-CapabilityBoundingSet=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+# CAP_SETUID/CAP_SETGID: iowatchd-notify drops to the desktop user with runuser.
+CapabilityBoundingSet=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_SETUID CAP_SETGID
 AmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
 ProtectKernelTunables=true
 ProtectControlGroups=true
