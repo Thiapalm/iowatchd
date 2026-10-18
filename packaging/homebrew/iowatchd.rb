@@ -9,12 +9,12 @@ class Iowatchd < Formula
 
   on_linux do
     on_intel do
-      url "https://github.com/Thiapalm/iowatchd/releases/download/v0.5.1/iowatchd-v0.5.1-linux-x86_64.tar.gz"
-      sha256 "4ee73a6dfca544e5ee76454b49d668aebac34d0351d029290a5727decacaac4d"
+      url "https://github.com/Thiapalm/iowatchd/releases/download/v0.5.2/iowatchd-v0.5.2-linux-x86_64.tar.gz"
+      sha256 "f5f862df67af2273b0e905578caa43aaf7df0f6c61921126c585cf52120aba5a"
     end
     on_arm do
-      url "https://github.com/Thiapalm/iowatchd/releases/download/v0.5.1/iowatchd-v0.5.1-linux-aarch64.tar.gz"
-      sha256 "daff7a7d569baefddfa6ff0eda1db5fb2f860e78c3a816ddf3670f75307f75d3"
+      url "https://github.com/Thiapalm/iowatchd/releases/download/v0.5.2/iowatchd-v0.5.2-linux-aarch64.tar.gz"
+      sha256 "de9662bf983430c29d12f482b69b2d8c196c385f8b799c202cac032f513dd971"
     end
   end
 
@@ -22,7 +22,7 @@ class Iowatchd < Formula
     bin.install "iowatchd", "iowatchd-log", "iowatchd-notify"
     man8.install "man/iowatchd.8"
     man5.install "man/iowatchd.conf.5"
-    man1.install "man/iowatchd-log.1"
+    man1.install "man/iowatchd-log.1", "man/iowatchd-notify.1"
     bash_completion.install "completions/iowatchd.bash" => "iowatchd"
     zsh_completion.install "completions/_iowatchd"
     fish_completion.install "completions/iowatchd.fish"
