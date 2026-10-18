@@ -2,7 +2,7 @@
 # Verifies that every file carrying the release version agrees with Cargo.toml.
 # Usage: scripts/check-versions.sh [vX.Y.Z]   (optional tag to compare against)
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 ver=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 fail=0
