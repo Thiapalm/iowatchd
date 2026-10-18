@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.5.1] - 2026-10-17
 
 ### Fixed
 - Desktop pop-ups (`notify_command = iowatchd-notify`) failed under the systemd unit: raised `TasksMax`, set `ProtectHome=read-only` (keeps `/run/user/<uid>/bus` reachable), allowed `CAP_SETUID`/`CAP_SETGID` and moved the throttle stamp to `RuntimeDirectory`.
