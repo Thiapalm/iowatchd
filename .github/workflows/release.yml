@@ -21,19 +21,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Tag matches the packaged versions
+        run: scripts/check-versions.sh "$GITHUB_REF_NAME"
       - run: cargo test --locked
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package (static binary, man pages, completions, init files)
         run: |
           name="iowatchd-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}"
-          mkdir "$name"
-          cp target/${{ matrix.target }}/release/iowatchd "$name/"
-          cp -r iowatchd-log iowatchd-notify man completions init config.conf \
-            Makefile LICENSE README.md CHANGELOG.md "$name/"
-          mkdir -p "$name/packaging"
-          cp -r packaging/logrotate "$name/packaging/"
-          tar czf "$name.tar.gz" "$name"
-          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          scripts/make-tarball.sh "$name" target/${{ matrix.target }}/release/iowatchd
+      - name: Smoke-test the tarball
+        run: REQUIRE_STATIC=1 scripts/check-tarball.sh iowatchd-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.arch }}

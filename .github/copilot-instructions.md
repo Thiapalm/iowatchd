@@ -31,4 +31,8 @@ Config precedence: CLI flags > `/etc/iowatchd.conf.d/*.conf` drop-ins > `/etc/io
 
 ## Releasing
 
-Tag-driven: pushing `vX.Y.Z` triggers `.github/workflows/release.yml` (static musl binaries for x86_64 and aarch64, GitHub release, `cargo publish` if `CARGO_REGISTRY_TOKEN` is set). Release commit "Release X.Y.Z" bumps the version in `Cargo.toml`, `Cargo.lock`, the `.TH` line of each `man/*`, `packaging/arch/PKGBUILD`, `packaging/rpm/iowatchd.spec` (+ changelog entry), `packaging/debian/changelog`, and turns `[Unreleased]` into the dated version in `CHANGELOG.md`. After the workflow finishes, a follow-up commit points `packaging/arch-bin/PKGBUILD` and `packaging/homebrew/iowatchd.rb` at the new version with the sha256 values from the release's `.sha256` assets.
+Tag-driven: pushing `vX.Y.Z` triggers `.github/workflows/release.yml` (static musl binaries for x86_64 and aarch64, GitHub release, `cargo publish` if `CARGO_REGISTRY_TOKEN` is set). Release commit "Release X.Y.Z" bumps the version in `Cargo.toml`, `Cargo.lock`, the `.TH` line of each `man/*`, `packaging/arch/PKGBUILD`, `packaging/rpm/iowatchd.spec` (+ changelog entry), `packaging/debian/changelog`, and turns `[Unreleased]` into the dated version in `CHANGELOG.md`; `scripts/check-versions.sh [vX.Y.Z]` verifies they all agree (CI and the release workflow run it). After the workflow finishes, a follow-up commit points `packaging/arch-bin/PKGBUILD` and `packaging/homebrew/iowatchd.rb` at the new version with the sha256 values from the release's `.sha256` assets.
+
+## Package checks
+
+CI builds and tests every package: `.deb`/`.rpm` (install + lint), Arch `PKGBUILD` and `-bin` (`makepkg`, the latter against the published release), the Homebrew formula (`brew audit/install/test`), and the static musl tarballs for x86_64/aarch64 (`scripts/make-tarball.sh`, `scripts/check-tarball.sh`). Scripts in `scripts/` are shellchecked.

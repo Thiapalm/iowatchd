@@ -105,6 +105,8 @@ For desktop pop-ups use the bundled helper: `notify_command = iowatchd-notify` (
 
     cargo fmt --check && cargo clippy --all-targets && cargo test
 
+Release packaging is checked in CI (Arch, Homebrew, `.deb`, `.rpm`, static tarballs). Locally, `scripts/check-versions.sh` verifies that every file carrying the version agrees with `Cargo.toml` (pass `vX.Y.Z` to also compare a tag).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

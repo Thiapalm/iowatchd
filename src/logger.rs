@@ -172,4 +172,87 @@ mod tests {
         assert_eq!(json_str("a\"b\\c\nd\te"), "\"a\\\"b\\\\c\\nd\\te\"");
         assert_eq!(json_str("\u{1}"), "\"\\u0001\"");
     }
+
+    fn temp_log(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("iowatchd-{name}-{}.log", std::process::id()))
+    }
+
+    fn logger(file: PathBuf, max_bytes: u64, json: bool) -> Logger {
+        Logger {
+            file: Some(file),
+            max_bytes,
+            json,
+            quiet: true,
+        }
+    }
+
+    #[test]
+    fn text_lines_have_a_timestamp_prefix() {
+        let path = temp_log("text");
+        let _ = fs::remove_file(&path);
+        logger(path.clone(), 0, false).emit("alert", "hello", "\"x\":1");
+        let text = fs::read_to_string(&path).unwrap();
+        let _ = fs::remove_file(&path);
+        let line = text.trim_end();
+        assert!(line.ends_with(" hello"), "{line}");
+        assert_eq!(line.len(), "YYYY-MM-DD HH:MM:SS hello".len());
+    }
+
+    #[test]
+    fn json_lines_include_extra_fields() {
+        let path = temp_log("json");
+        let _ = fs::remove_file(&path);
+        let l = logger(path.clone(), 0, true);
+        l.emit("alert", "a \"b\"", "\"util\":94");
+        l.log("started", "go");
+        let text = fs::read_to_string(&path).unwrap();
+        let _ = fs::remove_file(&path);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].starts_with("{\"time\":\""));
+        assert!(lines[0].contains("\"event\":\"alert\",\"message\":\"a \\\"b\\\"\",\"util\":94}"));
+        assert!(lines[1].ends_with("\"message\":\"go\"}"));
+    }
+
+    #[test]
+    fn file_rotates_to_dot_one_past_the_limit() {
+        let path = temp_log("rotate");
+        let old = PathBuf::from(format!("{}.1", path.display()));
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(&old);
+        let l = logger(path.clone(), 50, false);
+        l.log("a", &"x".repeat(60));
+        l.log("b", "fresh");
+        let current = fs::read_to_string(&path).unwrap();
+        let rotated = fs::read_to_string(&old).unwrap();
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(&old);
+        assert!(rotated.contains(&"x".repeat(60)));
+        assert!(current.contains("fresh") && !current.contains('x'));
+    }
+
+    #[test]
+    fn zero_max_bytes_disables_rotation() {
+        let path = temp_log("norotate");
+        let old = PathBuf::from(format!("{}.1", path.display()));
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(&old);
+        let l = logger(path.clone(), 0, false);
+        l.log("a", &"x".repeat(200));
+        l.log("b", "more");
+        let exists = old.exists();
+        let lines = fs::read_to_string(&path).unwrap().lines().count();
+        let _ = fs::remove_file(&path);
+        assert!(!exists);
+        assert_eq!(lines, 2);
+    }
+
+    #[test]
+    fn format_time_has_the_expected_shape() {
+        let t = format_time(0);
+        let b = t.as_bytes();
+        assert_eq!(t.len(), 19, "{t}");
+        assert!(b[4] == b'-' && b[7] == b'-' && b[10] == b' ' && b[13] == b':' && b[16] == b':');
+        assert_ne!(format_time(0), format_time(86_400 * 3));
+    }
 }

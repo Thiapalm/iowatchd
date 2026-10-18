@@ -500,4 +500,35 @@ mod tests {
         assert!(parse(&["-x"]).is_err());
         assert!(parse(&["--json=1"]).is_err());
     }
+
+    #[test]
+    fn edit_distance_counts_edits() {
+        assert_eq!(edit_distance("", ""), 0);
+        assert_eq!(edit_distance("kitten", "sitting"), 3);
+        assert_eq!(edit_distance("threshold", "treshold"), 1);
+    }
+
+    #[test]
+    fn dropins_are_sorted_and_filtered() {
+        let dir = std::env::temp_dir().join(format!("iowatchd-dropins-{}", std::process::id()));
+        let d = dir.join("main.conf.d");
+        fs::create_dir_all(&d).unwrap();
+        for f in ["20-b.conf", "10-a.conf", "ignored.txt"] {
+            fs::write(d.join(f), "").unwrap();
+        }
+        let found = dropins(dir.join("main.conf").to_str().unwrap());
+        let names: Vec<_> = found
+            .iter()
+            .map(|p| p.rsplit('/').next().unwrap().to_string())
+            .collect();
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(names, ["10-a.conf", "20-b.conf"]);
+        assert!(dropins("/nonexistent/iowatchd.conf").is_empty());
+    }
+
+    #[test]
+    fn explicit_config_path_wins() {
+        let cli = run(&["-c", "/tmp/x.conf"]);
+        assert_eq!(config_path(&cli), ("/tmp/x.conf".to_string(), true));
+    }
 }

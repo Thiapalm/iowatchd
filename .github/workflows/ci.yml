@@ -31,7 +31,16 @@ jobs:
           bash -n install.sh iowatchd-log iowatchd-notify completions/iowatchd.bash
           sudo apt-get install -y zsh shellcheck >/dev/null
           zsh -n completions/_iowatchd
-          shellcheck -S warning iowatchd-log iowatchd-notify
+          shellcheck -S warning iowatchd-log iowatchd-notify scripts/*.sh
+          sh -n init/runit/run init/openrc/iowatchd
+          shellcheck -S warning -s sh init/runit/run
+      - name: Release versions are consistent
+        run: scripts/check-versions.sh
+      - name: Logrotate config and systemd unit
+        run: |
+          sudo make install PREFIX=/usr/local
+          logrotate -d packaging/logrotate/iowatchd
+          systemd-analyze verify /etc/systemd/system/iowatchd.service
 
   package-check:
     runs-on: ubuntu-latest
@@ -51,6 +60,12 @@ jobs:
           cp -r packaging/debian debian
           dpkg-buildpackage -b -us -uc
           dpkg-deb -c ../iowatchd_*.deb
+      - name: Install the .deb and lint it
+        run: |
+          apt-get install -y ../iowatchd_*.deb lintian
+          iowatchd --version
+          test -f /etc/iowatchd.conf
+          lintian --fail-on error ../iowatchd_*.changes
 
   rpm:
     runs-on: ubuntu-latest
@@ -66,3 +81,92 @@ jobs:
           git archive --prefix="iowatchd-$ver/" -o ~/rpmbuild/SOURCES/iowatchd-$ver.tar.gz HEAD
           rpmbuild -ba packaging/rpm/iowatchd.spec
           rpm -qlp ~/rpmbuild/RPMS/*/iowatchd-*.rpm
+      - name: Install the .rpm and lint it
+        run: |
+          dnf install -y ~/rpmbuild/RPMS/*/iowatchd-*.rpm rpmlint
+          iowatchd --version
+          test -f /etc/iowatchd.conf
+          # Informational: Fedora policy findings (spelling, logrotate dep) are not release blockers
+          rpmlint ~/rpmbuild/RPMS/*/iowatchd-*.rpm || true
+
+  tarball:
+    strategy:
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, runner: ubuntu-latest, arch: x86_64 }
+          - { target: aarch64-unknown-linux-musl, runner: ubuntu-24.04-arm, arch: aarch64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Build and smoke-test the release tarball
+        run: |
+          name="iowatchd-vci-linux-${{ matrix.arch }}"
+          scripts/make-tarball.sh "$name" target/${{ matrix.target }}/release/iowatchd
+          REQUIRE_STATIC=1 scripts/check-tarball.sh "$name.tar.gz"
+
+  arch:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - run: pacman -Syu --noconfirm git namcap cargo
+      - uses: actions/checkout@v4
+      - name: Build the source package (PKGBUILD)
+        run: |
+          git config --global --add safe.directory "$PWD"
+          useradd -m builder
+          ver=$(sed -n 's/^pkgver=//p' packaging/arch/PKGBUILD)
+          dir=/home/builder/pkg
+          mkdir -p "$dir"
+          git archive --prefix="iowatchd-$ver/" -o "$dir/iowatchd-$ver.tar.gz" HEAD
+          # Use the local archive instead of the not-yet-existing release tag
+          sed 's|^source=.*|source=("$pkgname-$pkgver.tar.gz")|' packaging/arch/PKGBUILD > "$dir/PKGBUILD"
+          chown -R builder "$dir"
+          cd "$dir"
+          su builder -c "makepkg --noconfirm --skipchecksums"
+          namcap PKGBUILD
+          namcap iowatchd-*.pkg.tar.zst || true
+          pacman -U --noconfirm iowatchd-*.pkg.tar.zst
+          iowatchd --version
+
+  arch-bin:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - run: pacman -Syu --noconfirm git namcap
+      - uses: actions/checkout@v4
+      - name: Verify the released assets and checksums (PKGBUILD)
+        run: |
+          useradd -m builder
+          mkdir /home/builder/pkg
+          cp packaging/arch-bin/PKGBUILD /home/builder/pkg/
+          chown -R builder /home/builder/pkg
+          cd /home/builder/pkg
+          su builder -c "makepkg --noconfirm"
+          namcap PKGBUILD
+          pacman -U --noconfirm iowatchd-bin-*.pkg.tar.zst
+          iowatchd --version
+
+  homebrew:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Homebrew
+        run: |
+          NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+      - name: Audit, install and test the formula
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name CI
+          brew tap-new local/iowatchd
+          cp packaging/homebrew/iowatchd.rb "$(brew --repository local/iowatchd)/Formula/"
+          brew trust local/iowatchd || true
+          brew style local/iowatchd
+          brew audit --strict local/iowatchd/iowatchd
+          brew install local/iowatchd/iowatchd
+          brew test local/iowatchd/iowatchd

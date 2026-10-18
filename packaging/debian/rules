@@ -10,5 +10,5 @@ override_dh_auto_test:
 
 override_dh_auto_install:
 	$(MAKE) install DESTDIR=debian/iowatchd PREFIX=/usr \
-	  SYSTEMDUNITDIR=/lib/systemd/system \
+	  SYSTEMDUNITDIR=/usr/lib/systemd/system \
 	  LICENSEDIR=/usr/share/doc/iowatchd

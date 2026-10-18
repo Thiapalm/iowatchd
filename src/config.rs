@@ -210,4 +210,32 @@ mod tests {
         assert_eq!(c.clear_threshold, 50.0);
         assert_eq!(c.interval, 1);
     }
+
+    #[test]
+    fn normalize_clamps_unsafe_values() {
+        let (cfg, _) = parse("interval = 0\nprocess_window = 0\ntrigger_samples = 0\n");
+        assert_eq!(
+            (cfg.interval, cfg.process_window, cfg.trigger_samples),
+            (1, 1, 1)
+        );
+    }
+
+    #[test]
+    fn reads_remaining_keys() {
+        let (cfg, w) = parse(
+            "device = sda\ntop_n = 9\ncooldown = 30\nlog_file =\nlog_max_mb = 0\nsmart = off\n",
+        );
+        assert_eq!(cfg.device, "sda");
+        assert_eq!((cfg.top_n, cfg.cooldown, cfg.log_max_bytes), (9, 30, 0));
+        assert_eq!(cfg.log_file, None);
+        assert!(!cfg.smart);
+        assert!(w.is_empty(), "{w:?}");
+    }
+
+    #[test]
+    fn comments_and_blank_lines_are_ignored() {
+        let (cfg, w) = parse("# c\n\n  threshold = 90  # inline\n");
+        assert_eq!(cfg.threshold, 90.0);
+        assert!(w.is_empty());
+    }
 }
