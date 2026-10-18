@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/) and the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- CI now builds and tests every package: Arch (`PKGBUILD` and `-bin`), Homebrew formula, `.deb`/`.rpm` install and lint, static musl tarballs (x86_64 and aarch64), logrotate and systemd unit checks.
+- `scripts/check-versions.sh` verifies that all release files agree on the version (and the tag, in the release workflow).
+
 ## [0.5.1] - 2026-10-17
 
 ### Fixed
