@@ -47,7 +47,7 @@ check_bin() {
   echo "ok: $file = $declared"
 }
 check_bin packaging/arch-bin/PKGBUILD "$(sed -n 's/^pkgver=//p' packaging/arch-bin/PKGBUILD)" ""
-check_bin packaging/homebrew/iowatchd.rb "$(sed -n 's/^ *version "\(.*\)"/\1/p' packaging/homebrew/iowatchd.rb)" \
+check_bin packaging/homebrew/iowatchd.rb "$(sed -n 's/^ *url ".*download\/v\([^/]*\)\/.*/\1/p' packaging/homebrew/iowatchd.rb | sort -u | head -1)" \
   "$(sed -n 's/^ *url ".*download\/\(v[^/]*\)\/.*/\1/p' packaging/homebrew/iowatchd.rb)"
 
 exit $fail

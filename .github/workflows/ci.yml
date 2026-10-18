@@ -165,6 +165,7 @@ jobs:
           git config --global user.name CI
           brew tap-new local/iowatchd
           cp packaging/homebrew/iowatchd.rb "$(brew --repository local/iowatchd)/Formula/"
+          brew trust local/iowatchd || true
           brew style local/iowatchd
           brew audit --strict local/iowatchd/iowatchd
           brew install local/iowatchd/iowatchd

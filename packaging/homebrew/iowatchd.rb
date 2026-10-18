@@ -5,7 +5,6 @@
 class Iowatchd < Formula
   desc "Lightweight disk IO monitor that logs which processes cause high IO"
   homepage "https://github.com/Thiapalm/iowatchd"
-  version "0.5.1"
   license "MIT"
 
   on_linux do
@@ -27,7 +26,7 @@ class Iowatchd < Formula
     bash_completion.install "completions/iowatchd.bash" => "iowatchd"
     zsh_completion.install "completions/_iowatchd"
     fish_completion.install "completions/iowatchd.fish"
-    (share/"iowatchd").install "init", "config.conf"
+    pkgshare.install "init", "config.conf"
   end
 
   test do
